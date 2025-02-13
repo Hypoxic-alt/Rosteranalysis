@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+import numpy as np
 
 # Streamlit Dashboard
 st.title("Work Schedule Dashboard")
@@ -81,10 +82,7 @@ if uploaded_file:
     # **Toggle for showing percentages instead of counts**
     show_percentage = st.sidebar.checkbox("Show Percentages", value=False)
 
-    # **Toggle to show median shift distribution for all staff**
-    show_median = st.sidebar.checkbox("Show Median for All Staff", value=True)
-
-    # Display Date Range Above Chart
+    # **Display Date Range Above Chart**
     if not filtered_df.empty and filtered_df["Date"].notna().any():
         min_date = filtered_df["Date"].min().strftime("%d-%b-%Y")
         max_date = filtered_df["Date"].max().strftime("%d-%b-%Y")
@@ -92,32 +90,36 @@ if uploaded_file:
     else:
         st.subheader("No data available for selected shifts.")
 
-    # Visualization - Shift Distribution
-    st.subheader(f"Shift Distribution for {selected_name}")
-
-    # Calculate shift distribution (count or percentage)
+    # **Calculate shift distribution for selected staff**
     shift_counts = filtered_df["Shift"].value_counts()
     if show_percentage:
         shift_counts = (shift_counts / shift_counts.sum()) * 100  # Convert to percentage
 
     # **Calculate median shift distribution for all staff**
-    if show_median:
-        all_shift_counts = df_melted["Shift"].value_counts()
-        if show_percentage:
-            all_shift_counts = (all_shift_counts / all_shift_counts.sum()) * 100
-        median_shift_counts = all_shift_counts.median()  # Get median count/percentage
+    all_shift_counts = df_melted.groupby("Name")["Shift"].value_counts().unstack(fill_value=0)
+    median_shift_counts = all_shift_counts.median(axis=0)  # Median for each shift type
 
-    # Create Bar Chart
-    fig, ax = plt.subplots()
-    shift_counts.plot(kind="bar", ax=ax, color="skyblue", label=selected_name)
+    if show_percentage:
+        median_shift_counts = (median_shift_counts / median_shift_counts.sum()) * 100  # Convert to percentage
 
-    # **Show median as a horizontal line if enabled**
-    if show_median:
-        ax.axhline(median_shift_counts, color="red", linestyle="dashed", label="Median (All Staff)")
+    # **Ensure shifts are aligned in the chart**
+    all_shifts = set(shift_counts.index).union(set(median_shift_counts.index))
+    shift_counts = shift_counts.reindex(all_shifts, fill_value=0)
+    median_shift_counts = median_shift_counts.reindex(all_shifts, fill_value=0)
 
+    # **Create Bar Chart**
+    fig, ax = plt.subplots(figsize=(10, 5))
+    bar_width = 0.4
+    x = range(len(shift_counts))
+
+    ax.bar(x, shift_counts, width=bar_width, label=selected_name, color="skyblue", align='center')
+    ax.bar([i + bar_width for i in x], median_shift_counts, width=bar_width, label="Median (All Staff)", color="orange", align='center')
+
+    ax.set_xticks([i + bar_width / 2 for i in x])
+    ax.set_xticklabels(shift_counts.index, rotation=45, ha="right")
     ax.set_ylabel("Percentage" if show_percentage else "Count")
     ax.set_xlabel("Shift Type")
     ax.set_title(f"Shift Distribution for {selected_name}")
     ax.legend()
-    
+
     st.pyplot(fig)
