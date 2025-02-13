@@ -63,6 +63,15 @@ if uploaded_file:
     excluded_shifts = ["OFF", "Off", "RL SMO", "FL SMO", "SL", "PDL SMO"]
     df_melted = df_melted[~df_melted["Shift"].isin(excluded_shifts)]
 
+    # **Sidebar for Date Range Selection**
+    st.sidebar.header("Select Date Range")
+    min_date = df_melted["Date"].min()
+    max_date = df_melted["Date"].max()
+    start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date])
+
+    # Apply date filter
+    df_melted = df_melted[(df_melted["Date"] >= pd.Timestamp(start_date)) & (df_melted["Date"] <= pd.Timestamp(end_date))]
+
     # Sidebar for Filtering
     st.sidebar.header("Filter Options")
     selected_name = st.sidebar.selectbox("Select a Name:", df_melted["Name"].unique())
@@ -84,9 +93,9 @@ if uploaded_file:
 
     # **Display Date Range Above Chart**
     if not filtered_df.empty and filtered_df["Date"].notna().any():
-        min_date = filtered_df["Date"].min().strftime("%d-%b-%Y")
-        max_date = filtered_df["Date"].max().strftime("%d-%b-%Y")
-        st.subheader(f"Date Range: {min_date} to {max_date}")
+        min_date_display = filtered_df["Date"].min().strftime("%d-%b-%Y")
+        max_date_display = filtered_df["Date"].max().strftime("%d-%b-%Y")
+        st.subheader(f"Date Range: {min_date_display} to {max_date_display}")
     else:
         st.subheader("No data available for selected shifts.")
 
