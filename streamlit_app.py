@@ -35,9 +35,14 @@ if uploaded_file:
     # Filter Data for Selected Person
     filtered_df = df_melted[df_melted["Name"] == selected_name]
     
-    # Display Data
-    st.subheader(f"Schedule for {selected_name}")
-    st.dataframe(filtered_df)
+    # Sidebar Checkboxes for Shift Selection
+    st.sidebar.header("Select Shifts to Display")
+    shift_options = filtered_df["Shift"].unique()
+    selected_shifts = {shift: st.sidebar.checkbox(shift, value=True) for shift in shift_options}
+    
+    # Filter Data Based on Selected Shifts
+    active_shifts = [shift for shift, selected in selected_shifts.items() if selected]
+    filtered_df = filtered_df[filtered_df["Shift"].isin(active_shifts)]
     
     # Visualization - Shift Distribution
     st.subheader(f"Shift Distribution for {selected_name}")
