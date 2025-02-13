@@ -58,8 +58,8 @@ if uploaded_file:
     # Drop rows where shift data is missing
     df_melted = df_melted.dropna(subset=["Shift"])
 
-    # **Filter out unwanted shifts** (INCLUDING case-sensitive "OFF" and "Off")
-    excluded_shifts = ["OFF", "Off", "RL SMO", "FL SMO", "SL"]
+    # **Filter out unwanted shifts** (INCLUDING "PDL SMO" and previous ones)
+    excluded_shifts = ["OFF", "Off", "RL SMO", "FL SMO", "SL", "PDL SMO"]
     df_melted = df_melted[~df_melted["Shift"].isin(excluded_shifts)]
 
     # Sidebar for Filtering
@@ -81,6 +81,9 @@ if uploaded_file:
     # **Toggle for showing percentages instead of counts**
     show_percentage = st.sidebar.checkbox("Show Percentages", value=False)
 
+    # **Toggle to show median shift distribution for all staff**
+    show_median = st.sidebar.checkbox("Show Median for All Staff", value=True)
+
     # Display Date Range Above Chart
     if not filtered_df.empty and filtered_df["Date"].notna().any():
         min_date = filtered_df["Date"].min().strftime("%d-%b-%Y")
@@ -97,10 +100,24 @@ if uploaded_file:
     if show_percentage:
         shift_counts = (shift_counts / shift_counts.sum()) * 100  # Convert to percentage
 
+    # **Calculate median shift distribution for all staff**
+    if show_median:
+        all_shift_counts = df_melted["Shift"].value_counts()
+        if show_percentage:
+            all_shift_counts = (all_shift_counts / all_shift_counts.sum()) * 100
+        median_shift_counts = all_shift_counts.median()  # Get median count/percentage
+
     # Create Bar Chart
     fig, ax = plt.subplots()
-    shift_counts.plot(kind="bar", ax=ax, color="skyblue")
+    shift_counts.plot(kind="bar", ax=ax, color="skyblue", label=selected_name)
+
+    # **Show median as a horizontal line if enabled**
+    if show_median:
+        ax.axhline(median_shift_counts, color="red", linestyle="dashed", label="Median (All Staff)")
+
     ax.set_ylabel("Percentage" if show_percentage else "Count")
     ax.set_xlabel("Shift Type")
     ax.set_title(f"Shift Distribution for {selected_name}")
+    ax.legend()
+    
     st.pyplot(fig)
