@@ -69,6 +69,9 @@ if uploaded_file:
     max_date = df_melted["Date"].max()
     start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date])
 
+    # **Checkbox to show percentages (Default: Checked)**
+    show_percentage = st.sidebar.checkbox("Show Percentages", value=True)
+
     # Apply date filter
     df_melted = df_melted[(df_melted["Date"] >= pd.Timestamp(start_date)) & (df_melted["Date"] <= pd.Timestamp(end_date))]
 
@@ -87,9 +90,6 @@ if uploaded_file:
     # **Filter Data Based on Selected Shifts**
     active_shifts = [shift for shift, selected in selected_shifts.items() if selected]
     filtered_df = filtered_df[filtered_df["Shift"].isin(active_shifts)]
-
-    # **Toggle for showing percentages instead of counts**
-    show_percentage = st.sidebar.checkbox("Show Percentages", value=False)
 
     # **Display Date Range Above Chart**
     if not filtered_df.empty and filtered_df["Date"].notna().any():
@@ -111,12 +111,7 @@ if uploaded_file:
     if show_percentage:
         median_shift_counts = (median_shift_counts / median_shift_counts.sum()) * 100  # Convert to percentage
 
-    # **Ensure shifts are aligned in the chart**
-    all_shifts = set(shift_counts.index).union(set(median_shift_counts.index))
-    shift_counts = shift_counts.reindex(all_shifts, fill_value=0)
-    median_shift_counts = median_shift_counts.reindex(all_shifts, fill_value=0)
-
-    # **Create Bar Chart**
+    # **Create Shift Distribution Chart**
     fig, ax = plt.subplots(figsize=(10, 5))
     bar_width = 0.4
     x = range(len(shift_counts))
@@ -130,5 +125,17 @@ if uploaded_file:
     ax.set_xlabel("Shift Type")
     ax.set_title(f"Shift Distribution for {selected_name}")
     ax.legend()
+    st.pyplot(fig)
 
+    # **Weekend Shift Analysis**
+    filtered_df["Day"] = filtered_df["Date"].dt.day_name()
+    weekend_counts = filtered_df[filtered_df["Day"].isin(["Saturday", "Sunday"])].groupby("Day").size()
+    
+    if show_percentage:
+        weekend_counts = (weekend_counts / weekend_counts.sum()) * 100  # Convert to percentage
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    weekend_counts.plot(kind="bar", ax=ax, color=["blue", "red"])
+    ax.set_ylabel("Percentage" if show_percentage else "Count")
+    ax.set_title(f"Weekend Shifts for {selected_name}")
     st.pyplot(fig)
