@@ -72,10 +72,10 @@ if uploaded_file:
 
     # Sidebar Checkboxes for Shift Selection
     st.sidebar.header("Select Shifts to Display")
-    shift_options = filtered_df["Shift"].unique()
+    shift_options = sorted(filtered_df["Shift"].unique())
     selected_shifts = {shift: st.sidebar.checkbox(shift, value=True) for shift in shift_options}
 
-    # Filter Data Based on Selected Shifts
+    # **Filter Data Based on Selected Shifts**
     active_shifts = [shift for shift, selected in selected_shifts.items() if selected]
     filtered_df = filtered_df[filtered_df["Shift"].isin(active_shifts)]
 
@@ -95,9 +95,9 @@ if uploaded_file:
     if show_percentage:
         shift_counts = (shift_counts / shift_counts.sum()) * 100  # Convert to percentage
 
-    # **Calculate median shift distribution for all staff**
-    all_shift_counts = df_melted.groupby("Name")["Shift"].value_counts().unstack(fill_value=0)
-    median_shift_counts = all_shift_counts.median(axis=0)  # Median for each shift type
+    # **Calculate median shift distribution for all staff but only for selected shifts**
+    all_shift_counts = df_melted[df_melted["Shift"].isin(active_shifts)]
+    median_shift_counts = all_shift_counts.groupby("Name")["Shift"].value_counts().unstack(fill_value=0).median(axis=0)
 
     if show_percentage:
         median_shift_counts = (median_shift_counts / median_shift_counts.sum()) * 100  # Convert to percentage
