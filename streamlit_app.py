@@ -146,4 +146,17 @@ if uploaded_file:
         if show_percentage:
             median_total = median_weekend + median_weekday
             if median_total > 0:
-                median_weekend = (median_weekend
+                median_weekend = (median_weekend / median_total) * 100
+                median_weekday = (median_weekday / median_total) * 100
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    labels = ["Weekdays", "Weekends"]
+    values = [weekday_shifts, weekend_shifts]
+
+    ax.bar(labels, values, color=["blue", "red"], label=selected_name)
+    if show_median:
+        ax.bar(labels, [median_weekday, median_weekend], color="orange", alpha=0.5, label="Median (All Staff)")
+
+    ax.set_ylabel("Percentage" if show_percentage else "Count")
+    ax.legend()
+    st.pyplot(fig)
