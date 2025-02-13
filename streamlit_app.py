@@ -44,11 +44,11 @@ if uploaded_file:
     active_shifts = [shift for shift, selected in selected_shifts.items() if selected]
     filtered_df = filtered_df[filtered_df["Shift"].isin(active_shifts)]
     
-    # Display Date Range Above Chart
-    if not filtered_df.empty:
-        min_date = filtered_df["Date"].min().strftime("%d-%b-%Y")
-        max_date = filtered_df["Date"].max().strftime("%d-%b-%Y")
-        st.subheader(f"Date Range: {min_date} to {max_date}")
+    # Display Date Range Above Chart (With Error Handling)
+    if not filtered_df.empty and filtered_df["Date"].notna().any():
+        min_date = filtered_df["Date"].min()
+        max_date = filtered_df["Date"].max()
+        st.subheader(f"Date Range: {min_date.strftime('%d-%b-%Y')} to {max_date.strftime('%d-%b-%Y')}")
     else:
         st.subheader("No data available for selected shifts.")
 
