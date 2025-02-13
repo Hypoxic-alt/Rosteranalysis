@@ -1,13 +1,16 @@
 import streamlit as st
 import pandas as pd
+import matplotlib.pyplot as plt
 
 # Streamlit Dashboard
 st.title("Work Schedule Dashboard")
 
-# File uploader
-uploaded_file = st.file_uploader("Upload an Excel file", type=["xlsx"])
+# Sidebar for File Upload
+st.sidebar.header("Upload Data")
+uploaded_file = st.sidebar.file_uploader("Upload an Excel file", type=["xlsx"])
 
 if uploaded_file:
+    # Read Excel File
     df = pd.ExcelFile(uploaded_file)
     sheet_name = df.sheet_names[0]  # Assuming first sheet
     df = pd.read_excel(df, sheet_name=sheet_name)
@@ -25,20 +28,25 @@ if uploaded_file:
     df_melted["Date"] = pd.to_datetime(df_melted["Date"], errors='coerce')
     df_melted = df_melted.dropna(subset=["Shift"])
     
-    # Filters
-    names = st.multiselect("Select Names:", df_melted["Name"].unique())
-    dates = st.date_input("Select Date Range:", [])
+    # Sidebar for Filtering
+    st.sidebar.header("Filter Options")
+    selected_name = st.sidebar.selectbox("Select a Name:", df_melted["Name"].unique())
     
-    filtered_df = df_melted
-    if names:
-        filtered_df = filtered_df[filtered_df["Name"].isin(names)]
-    if dates:
-        filtered_df = filtered_df[(filtered_df["Date"] >= dates[0]) & (filtered_df["Date"] <= dates[-1])]
+    # Filter Data for Selected Person
+    filtered_df = df_melted[df_melted["Name"] == selected_name]
     
+    # Display Data
+    st.subheader(f"Schedule for {selected_name}")
     st.dataframe(filtered_df)
     
-    # Visualizations
-    st.subheader("Shift Distribution")
+    # Visualization - Shift Distribution
+    st.subheader(f"Shift Distribution for {selected_name}")
     shift_counts = filtered_df["Shift"].value_counts()
-    st.bar_chart(shift_counts)
 
+    # Create Bar Chart
+    fig, ax = plt.subplots()
+    shift_counts.plot(kind="bar", ax=ax, color="skyblue")
+    ax.set_ylabel("Count")
+    ax.set_xlabel("Shift Type")
+    ax.set_title(f"Shift Distribution for {selected_name}")
+    st.pyplot(fig)
