@@ -94,50 +94,55 @@ if uploaded_file:
     active_shifts = [shift for shift, selected in selected_shifts.items() if selected]
     filtered_df = filtered_df[filtered_df["Shift"].isin(active_shifts)]
 
-    # **Calculate total shifts and weekend/weekday ratio**
+    # **Calculate shift distribution for selected staff**
+    shift_counts = filtered_df["Shift"].value_counts()
+    if show_percentage:
+        shift_counts = (shift_counts / shift_counts.sum()) * 100  # Convert to percentage
+
+    # **Calculate median shift distribution for all staff but only for selected shifts**
+    all_shift_counts = df_melted[df_melted["Shift"].isin(active_shifts)]
+    median_shift_counts = all_shift_counts.groupby("Name")["Shift"].value_counts().unstack(fill_value=0).median(axis=0)
+
+    if show_percentage:
+        median_shift_counts = (median_shift_counts / median_shift_counts.sum()) * 100  # Convert to percentage
+
+    # **Ensure shifts are aligned in the chart**
+    all_shifts = set(shift_counts.index).union(set(median_shift_counts.index))
+    shift_counts = shift_counts.reindex(all_shifts, fill_value=0)
+    median_shift_counts = median_shift_counts.reindex(all_shifts, fill_value=0)
+
+    # **Create Shift Distribution Chart**
+    st.subheader(f"Shift Distribution for {selected_name}")
+    fig, ax = plt.subplots(figsize=(10, 5))
+    bar_width = 0.4
+    x = range(len(shift_counts))
+
+    ax.bar(x, shift_counts, width=bar_width, label=selected_name, color="skyblue", align='center')
+    if show_median:
+        ax.bar([i + bar_width for i in x], median_shift_counts, width=bar_width, label="Median (All Staff)", color="orange", align='center')
+
+    ax.set_xticks([i + bar_width / 2 for i in x])
+    ax.set_xticklabels(shift_counts.index, rotation=45, ha="right")
+    ax.set_ylabel("Percentage" if show_percentage else "Count")
+    ax.set_xlabel("Shift Type")
+    ax.legend()
+    st.pyplot(fig)
+
+    # **Plot Weekend vs. Weekday Shifts**
     filtered_df["Day"] = filtered_df["Date"].dt.day_name()
     total_shifts = len(filtered_df)
     weekend_shifts = len(filtered_df[filtered_df["Day"].isin(["Saturday", "Sunday"])])
     weekday_shifts = total_shifts - weekend_shifts
 
-    # Convert to percentage if enabled
     if show_percentage and total_shifts > 0:
         weekend_shifts = (weekend_shifts / total_shifts) * 100
         weekday_shifts = (weekday_shifts / total_shifts) * 100
 
-    # **Calculate median weekend/weekday percentage across all staff**
-    if show_median:
-        all_weekend_counts = df_melted.groupby("Name").apply(lambda x: (x["Date"].dt.day_name().isin(["Saturday", "Sunday"])).sum())
-        all_weekday_counts = df_melted.groupby("Name").apply(lambda x: (~x["Date"].dt.day_name().isin(["Saturday", "Sunday"])).sum())
-
-        median_weekend = all_weekend_counts.median()
-        median_weekday = all_weekday_counts.median()
-
-        # Convert to percentage if enabled
-        if show_percentage:
-            median_total = median_weekend + median_weekday
-            if median_total > 0:
-                median_weekend = (median_weekend / median_total) * 100
-                median_weekday = (median_weekday / median_total) * 100
-
-    # **Plot Weekend vs. Weekday Shifts**
     fig, ax = plt.subplots(figsize=(6, 4))
     labels = ["Weekdays", "Weekends"]
-    selected_values = [weekday_shifts, weekend_shifts]
-    median_values = [median_weekday, median_weekend] if show_median else None
+    values = [weekday_shifts, weekend_shifts]
 
-    # Bar positions
-    x = np.arange(len(labels))
-    bar_width = 0.4
-
-    ax.bar(x, selected_values, width=bar_width, label=selected_name, color="skyblue", align='center')
-
-    if show_median:
-        ax.bar(x + bar_width, median_values, width=bar_width, label="Median (All Staff)", color="orange", align='center')
-
-    ax.set_xticks(x + (bar_width / 2 if show_median else 0))
-    ax.set_xticklabels(labels)
+    ax.bar(labels, values, color=["blue", "red"])
     ax.set_ylabel("Percentage" if show_percentage else "Count")
     ax.set_title(f"Weekday vs. Weekend Shifts for {selected_name}")
-    ax.legend()
     st.pyplot(fig)
