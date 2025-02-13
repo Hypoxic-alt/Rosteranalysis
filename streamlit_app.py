@@ -44,6 +44,14 @@ if uploaded_file:
     active_shifts = [shift for shift, selected in selected_shifts.items() if selected]
     filtered_df = filtered_df[filtered_df["Shift"].isin(active_shifts)]
     
+    # Display Date Range Above Chart
+    if not filtered_df.empty:
+        min_date = filtered_df["Date"].min().strftime("%d-%b-%Y")
+        max_date = filtered_df["Date"].max().strftime("%d-%b-%Y")
+        st.subheader(f"Date Range: {min_date} to {max_date}")
+    else:
+        st.subheader("No data available for selected shifts.")
+
     # Visualization - Shift Distribution
     st.subheader(f"Shift Distribution for {selected_name}")
     shift_counts = filtered_df["Shift"].value_counts()
