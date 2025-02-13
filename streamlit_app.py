@@ -25,9 +25,29 @@ if uploaded_file:
     # Drop any fully empty columns
     df_cleaned = df_cleaned.dropna(axis=1, how='all')
 
-    # Convert column headers to string (dates are in the second row)
-    date_headers = df.iloc[2, 1:].dropna().values  # Extract actual dates from row 3
-    df_cleaned.columns = ["Name"] + list(date_headers)  # Assign corrected headers
+    # Extract date row (Row 3, ignoring NaNs)
+    date_strings = df.iloc[2, 1:].dropna().astype(str) + "-2024"  # Start assuming 2024
+
+    # Correct year transition from 2024 to 2025
+    corrected_dates = []
+    current_year = 2024  # Start with 2024
+
+    for date in date_strings:
+        parsed_date = pd.to_datetime(date[:-5], format='%a %d-%b', errors='coerce')
+
+        # If the month switches from Dec -> Jan, update to 2025
+        if corrected_dates and parsed_date.month == 1 and corrected_dates[-1].month == 12:
+            current_year = 2025
+
+        corrected_date_str = f"{parsed_date.strftime('%a %d-%b')}-{current_year}"
+        corrected_date = pd.to_datetime(corrected_date_str, format='%a %d-%b-%Y', errors='coerce')
+        corrected_dates.append(corrected_date)
+
+    # Convert to pandas Series
+    date_series = pd.Series(corrected_dates)
+
+    # Update column names with corrected dates
+    df_cleaned.columns = ["Name"] + list(date_series)
 
     # Reshape data to long format
     df_melted = df_cleaned.melt(id_vars=["Name"], var_name="Date", value_name="Shift")
