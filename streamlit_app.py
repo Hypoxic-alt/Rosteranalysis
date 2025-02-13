@@ -149,14 +149,22 @@ if uploaded_file:
                 median_weekend = (median_weekend / median_total) * 100
                 median_weekday = (median_weekday / median_total) * 100
 
+# **Plot Weekend vs. Weekday Shifts**
     fig, ax = plt.subplots(figsize=(6, 4))
     labels = ["Weekdays", "Weekends"]
-    values = [weekday_shifts, weekend_shifts]
+    selected_values = [weekday_shifts, weekend_shifts]
+    median_values = [median_weekday, median_weekend] if show_median else None
 
-    ax.bar(labels, values, color=["blue", "red"], label=selected_name)
+    x = np.arange(len(labels))
+    bar_width = 0.4
+
+    ax.bar(x, selected_values, width=bar_width, label=selected_name, color="skyblue", align='center')
     if show_median:
-        ax.bar(labels, [median_weekday, median_weekend], color="orange", alpha=0.5, label="Median (All Staff)")
+        ax.bar(x + bar_width, median_values, width=bar_width, label="Median (All Staff)", color="orange", align='center')
 
+    ax.set_xticks(x + (bar_width / 2 if show_median else 0))
+    ax.set_xticklabels(labels)
     ax.set_ylabel("Percentage" if show_percentage else "Count")
+    ax.set_title(f"Weekday vs. Weekend Shifts for {selected_name}")
     ax.legend()
     st.pyplot(fig)
