@@ -58,8 +58,8 @@ if uploaded_file:
     # Drop rows where shift data is missing
     df_melted = df_melted.dropna(subset=["Shift"])
 
-    # **Filter out unwanted shifts**
-    excluded_shifts = ["OFF", "RL SMO", "FL SMO", "SL"]
+    # **Filter out unwanted shifts** (INCLUDING case-sensitive "OFF" and "Off")
+    excluded_shifts = ["OFF", "Off", "RL SMO", "FL SMO", "SL"]
     df_melted = df_melted[~df_melted["Shift"].isin(excluded_shifts)]
 
     # Sidebar for Filtering
