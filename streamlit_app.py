@@ -58,6 +58,10 @@ if uploaded_file:
     # Drop rows where shift data is missing
     df_melted = df_melted.dropna(subset=["Shift"])
 
+    # **Filter out unwanted shifts**
+    excluded_shifts = ["OFF", "RL SMO", "FL SMO", "SL"]
+    df_melted = df_melted[~df_melted["Shift"].isin(excluded_shifts)]
+
     # Sidebar for Filtering
     st.sidebar.header("Filter Options")
     selected_name = st.sidebar.selectbox("Select a Name:", df_melted["Name"].unique())
@@ -74,6 +78,9 @@ if uploaded_file:
     active_shifts = [shift for shift, selected in selected_shifts.items() if selected]
     filtered_df = filtered_df[filtered_df["Shift"].isin(active_shifts)]
 
+    # **Toggle for showing percentages instead of counts**
+    show_percentage = st.sidebar.checkbox("Show Percentages", value=False)
+
     # Display Date Range Above Chart
     if not filtered_df.empty and filtered_df["Date"].notna().any():
         min_date = filtered_df["Date"].min().strftime("%d-%b-%Y")
@@ -84,12 +91,16 @@ if uploaded_file:
 
     # Visualization - Shift Distribution
     st.subheader(f"Shift Distribution for {selected_name}")
+
+    # Calculate shift distribution (count or percentage)
     shift_counts = filtered_df["Shift"].value_counts()
+    if show_percentage:
+        shift_counts = (shift_counts / shift_counts.sum()) * 100  # Convert to percentage
 
     # Create Bar Chart
     fig, ax = plt.subplots()
     shift_counts.plot(kind="bar", ax=ax, color="skyblue")
-    ax.set_ylabel("Count")
+    ax.set_ylabel("Percentage" if show_percentage else "Count")
     ax.set_xlabel("Shift Type")
     ax.set_title(f"Shift Distribution for {selected_name}")
     st.pyplot(fig)
