@@ -8,8 +8,8 @@ import numpy as np
 # =============================================================================
 def process_file(source):
     """
-    Process the Excel file from the given source (which can be a file-like object
-    or a URL) and return a melted DataFrame with columns: 'Name', 'Date', 'Shift'.
+    Process the Excel file from the given source (a file-like object or a URL)
+    and return a melted DataFrame with columns: 'Name', 'Date', 'Shift'.
     """
     df = pd.ExcelFile(source)
     sheet_name = df.sheet_names[0]
@@ -79,8 +79,6 @@ def upload_page():
 
     st.markdown("---")
     st.write("**Or load the file automatically from Google Drive:**")
-
-    # --- Option 2: Load from Google Drive via copy-paste link ---
     gdrive_link = st.text_input("Enter the Google Drive shareable URL:")
     if st.button("Load File from Google Drive"):
         if gdrive_link:
@@ -105,12 +103,11 @@ def upload_page():
 def main_data_page():
     st.title("Main Data")
     
-    if "df_melted" not in st.session_state or st.session_state["df_melted"] is None:
+    if "df_melted" not in st.session_state:
         st.error("No file uploaded yet. Please navigate to the 'Upload File' page and upload a file.")
         return
     
     df_melted = st.session_state["df_melted"]
-
     st.sidebar.header("Main Data Filters")
     min_date = df_melted["Date"].min()
     max_date = df_melted["Date"].max()
@@ -202,31 +199,22 @@ def main_data_page():
     st.pyplot(fig)
 
 # =============================================================================
-#                    PAGE 3: ADMINISTRATIVE TIME ANALYSIS
+#                   PAGE 3: ADMIN CONFIGURATION
 # =============================================================================
-def admin_time_page():
-    st.title("Administrative Time Analysis")
-    
-    if "df_melted" not in st.session_state or st.session_state["df_melted"] is None:
+def admin_config_page():
+    st.title("Admin Configuration")
+    st.write("Set the administration hour values for each shift and toggle shifts on or off. "
+             "These settings will be used in all admin calculations.")
+
+    if "df_melted" not in st.session_state:
         st.error("No file uploaded yet. Please navigate to the 'Upload File' page and upload a file.")
         return
-    
-    df_melted = st.session_state["df_melted"]
 
-    # Sidebar: Date range filter
-    st.sidebar.header("Administrative Time Filters")
-    min_date = df_melted["Date"].min()
-    max_date = df_melted["Date"].max()
-    start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date])
+    df_melted = st.session_state["df_melted"]
+    unique_shifts = sorted(df_melted["Shift"].unique())
     
-    # Filter data based on date range
-    df_filtered = df_melted[(df_melted["Date"] >= pd.Timestamp(start_date)) &
-                            (df_melted["Date"] <= pd.Timestamp(end_date))].copy()
-    
-    # Sidebar: Administration Hour Values for each unique shift
-    st.sidebar.header("Administration Hour Values (out of 10)")
-    unique_shifts = sorted(df_filtered["Shift"].unique())
-    # Provide default values for known shifts; others default to 0.
+    st.write("For each shift, set the number of admin hours (out of 10). Uncheck the box to disable that shift from admin calculations.")
+    # Default values for known shifts; default to 0 for others.
     default_values = {
         "CST": 10,
         "HB IC PM": 3,
@@ -235,30 +223,62 @@ def admin_time_page():
         "HB AM EDSTTA": 5,
         "HB IC AM": 5
     }
-    admin_dict = {}
+    
+    admin_config = {}
     for shift in unique_shifts:
-        default_val = default_values.get(shift, 0)
-        admin_dict[shift] = st.sidebar.number_input(f"{shift}:", value=default_val, min_value=0, max_value=10, step=1, key=f"admin_{shift}")
+        col1, col2 = st.columns([1,1])
+        with col1:
+            include = st.checkbox(f"Include {shift}", value=True, key=f"include_{shift}")
+        with col2:
+            default_val = default_values.get(shift, 0)
+            hours = st.number_input(f"{shift} admin hours (out of 10):", value=default_val, min_value=0, max_value=10, step=1, key=f"value_{shift}")
+        # Only include the shift if enabled; otherwise, set to 0.
+        admin_config[shift] = hours if include else 0
 
-    # Calculate administrative hours per record based on custom inputs
+    # Store the configuration in session_state so other pages can use it.
+    st.session_state["admin_config"] = admin_config
+    st.success("Admin configuration updated!")
+
+    st.write("Current configuration:")
+    st.write(admin_config)
+
+# =============================================================================
+#                    PAGE 4: ADMINISTRATIVE TIME ANALYSIS
+# =============================================================================
+def admin_time_page():
+    st.title("Administrative Time Analysis")
+    
+    if "df_melted" not in st.session_state:
+        st.error("No file uploaded yet. Please navigate to the 'Upload File' page and upload a file.")
+        return
+    
+    # Use admin configuration from session_state; if not set, use an empty dict.
+    admin_config = st.session_state.get("admin_config", {})
+    
+    df_melted = st.session_state["df_melted"]
+    st.sidebar.header("Administrative Time Filters")
+    min_date = df_melted["Date"].min()
+    max_date = df_melted["Date"].max()
+    start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date])
+    
+    df_filtered = df_melted[(df_melted["Date"] >= pd.Timestamp(start_date)) &
+                            (df_melted["Date"] <= pd.Timestamp(end_date))].copy()
+    
+    # Calculate admin hours per record using the configuration.
     def get_admin_hours(row):
         shift = row["Shift"]
         # For HB AM EDSTTA and HB IC AM, count only on weekdays.
         if shift in ["HB AM EDSTTA", "HB IC AM"]:
-            return admin_dict[shift] if row["Date"].weekday() < 5 else 0
-        elif shift in admin_dict:
-            return admin_dict[shift]
+            return admin_config.get(shift, 0) if row["Date"].weekday() < 5 else 0
         else:
-            return 0
-
+            return admin_config.get(shift, 0)
+    
     df_filtered["AdminHours"] = df_filtered.apply(get_admin_hours, axis=1)
     
-    # Overall administrative percentage for all staff
     total_admin_hours_all = df_filtered["AdminHours"].sum()
     total_shifts_all = len(df_filtered)
     overall_admin_percentage = (total_admin_hours_all / (total_shifts_all * 10)) * 100 if total_shifts_all > 0 else 0
     
-    # Calculate for a selected staff member
     st.sidebar.header("Filter by Staff Member")
     names = df_filtered["Name"].unique()
     selected_name = st.sidebar.selectbox("Select a Name:", names)
@@ -282,54 +302,36 @@ def admin_time_page():
     st.pyplot(fig)
 
 # =============================================================================
-#                    PAGE 4: ADMIN COMPARISON GRAPH
+#                    PAGE 5: ADMIN COMPARISON GRAPH
 # =============================================================================
 def admin_comparison_page():
     st.title("Administrative Time Comparison (All Staff)")
     
-    if "df_melted" not in st.session_state or st.session_state["df_melted"] is None:
+    if "df_melted" not in st.session_state:
         st.error("No file uploaded yet. Please navigate to the 'Upload File' page and upload a file.")
         return
     
-    df_melted = st.session_state["df_melted"]
+    # Use admin configuration from session_state.
+    admin_config = st.session_state.get("admin_config", {})
     
+    df_melted = st.session_state["df_melted"]
     st.sidebar.header("Admin Comparison Filters")
     min_date = df_melted["Date"].min()
     max_date = df_melted["Date"].max()
     start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date], key="admin_compare_date")
     
-    # Sidebar: Administration Hour Values for each unique shift (for comparison)
-    st.sidebar.header("Administration Hour Values (out of 10)")
-    unique_shifts = sorted(df_melted["Shift"].unique())
-    default_values = {
-        "CST": 10,
-        "HB IC PM": 3,
-        "HB 21C PM": 3,
-        "MIC": 5,
-        "HB AM EDSTTA": 5,
-        "HB IC AM": 5
-    }
-    admin_dict = {}
-    for shift in unique_shifts:
-        default_val = default_values.get(shift, 0)
-        admin_dict[shift] = st.sidebar.number_input(f"{shift}:", value=default_val, min_value=0, max_value=10, step=1, key=f"cmp_admin_{shift}")
-    
-    # Filter data based on date range
     df_filtered = df_melted[(df_melted["Date"] >= pd.Timestamp(start_date)) &
                             (df_melted["Date"] <= pd.Timestamp(end_date))].copy()
     
-    # Calculate admin hours for each record using custom inputs
     def get_admin_hours(row):
         shift = row["Shift"]
         if shift in ["HB AM EDSTTA", "HB IC AM"]:
-            return admin_dict[shift] if row["Date"].weekday() < 5 else 0
-        elif shift in admin_dict:
-            return admin_dict[shift]
+            return admin_config.get(shift, 0) if row["Date"].weekday() < 5 else 0
         else:
-            return 0
+            return admin_config.get(shift, 0)
+    
     df_filtered["AdminHours"] = df_filtered.apply(get_admin_hours, axis=1)
     
-    # Calculate the administrative percentage for each user
     admin_percentages = {}
     for name, group in df_filtered.groupby("Name"):
         total_admin = group["AdminHours"].sum()
@@ -338,7 +340,6 @@ def admin_comparison_page():
         admin_percentages[name] = percentage
     admin_df = pd.DataFrame(list(admin_percentages.items()), columns=["Name", "AdminPercentage"])
     
-    # Sidebar: Select which users to display (checkboxes)
     st.sidebar.header("Select Users to Display")
     all_names = admin_df["Name"].tolist()
     selected_users = []
@@ -360,11 +361,19 @@ def admin_comparison_page():
 # =============================================================================
 #                            PAGE NAVIGATION
 # =============================================================================
-page = st.sidebar.radio("Navigation", ["Upload File", "Main Data", "Administrative Time", "Admin Comparison"])
+page = st.sidebar.radio("Navigation", [
+    "Upload File",
+    "Main Data",
+    "Admin Configuration",
+    "Administrative Time",
+    "Admin Comparison"
+])
 if page == "Upload File":
     upload_page()
 elif page == "Main Data":
     main_data_page()
+elif page == "Admin Configuration":
+    admin_config_page()
 elif page == "Administrative Time":
     admin_time_page()
 elif page == "Admin Comparison":
