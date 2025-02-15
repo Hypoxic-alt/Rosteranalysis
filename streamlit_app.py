@@ -11,23 +11,17 @@ def process_file(source):
     Process the Excel file from the given source (which can be a file-like object
     or a URL) and return a melted DataFrame with columns: 'Name', 'Date', 'Shift'.
     """
-    # Read the Excel file from the source and select the first sheet
     df = pd.ExcelFile(source)
     sheet_name = df.sheet_names[0]
     df = pd.read_excel(df, sheet_name=sheet_name, header=None)
 
     # ----------------- DATA CLEANING & PREPARATION ---------------------------
-    # Assume data starts at row 3 (0-indexed row 3)
     df_cleaned = df.iloc[3:].reset_index(drop=True)
-    # Row 1 (index 1) contains headers (names and dates)
     df_cleaned.columns = df.iloc[1]
-    # Rename the first column to "Name"
     df_cleaned.rename(columns={df_cleaned.columns[0]: "Name"}, inplace=True)
-    # Drop any completely empty columns
     df_cleaned = df_cleaned.dropna(axis=1, how='all')
 
     # ----------------- DATE EXTRACTION & CORRECTION --------------------------
-    # Extract date strings from row 3 (index 2) and append a default year (2024)
     date_strings = df.iloc[2, 1:].dropna().astype(str) + "-2024"
     corrected_dates = []
     current_year = 2024
@@ -58,7 +52,7 @@ def process_file(source):
 def convert_to_direct_url(shareable_url):
     """
     Convert a Google Drive shareable URL to a direct download URL.
-    For example:
+    Example:
       Shareable URL: https://drive.google.com/file/d/FILE_ID/view?usp=sharing
       Direct download URL: https://drive.google.com/uc?export=download&id=FILE_ID
     """
@@ -87,7 +81,6 @@ def upload_page():
     st.write("**Or load the file automatically from Google Drive:**")
 
     # --- Option 2: Load from Google Drive via copy-paste link ---
-    # Text input for the user to paste the Google Drive shareable URL.
     gdrive_link = st.text_input("Enter the Google Drive shareable URL:")
     if st.button("Load File from Google Drive"):
         if gdrive_link:
@@ -102,7 +95,6 @@ def upload_page():
         else:
             st.error("Please enter a valid Google Drive URL.")
 
-    # Optionally display a preview if data has been loaded
     if "df_melted" in st.session_state:
         st.write("Preview of loaded data:")
         st.dataframe(st.session_state["df_melted"].head())
@@ -119,7 +111,6 @@ def main_data_page():
     
     df_melted = st.session_state["df_melted"]
 
-    # ------------------- SIDEBAR FILTERS -----------------------
     st.sidebar.header("Main Data Filters")
     min_date = df_melted["Date"].min()
     max_date = df_melted["Date"].max()
@@ -127,13 +118,11 @@ def main_data_page():
     show_percentage = st.sidebar.checkbox("Show Percentages", value=True)
     show_median = st.sidebar.checkbox("Show Median Comparison", value=True)
     
-    # Apply date filter
     df_filtered = df_melted[
         (df_melted["Date"] >= pd.Timestamp(start_date)) &
         (df_melted["Date"] <= pd.Timestamp(end_date))
     ]
     
-    # ------------------- FILTER BY NAME & SHIFT -----------------------
     st.sidebar.header("Filter Options")
     names = df_filtered["Name"].unique()
     selected_name = st.sidebar.selectbox("Select a Name:", names)
@@ -145,7 +134,6 @@ def main_data_page():
     active_shifts = [shift for shift, selected in selected_shifts.items() if selected]
     df_person = df_person[df_person["Shift"].isin(active_shifts)]
     
-    # ------------------- PLOT 1: SHIFT DISTRIBUTION -----------------------
     st.subheader(f"Shift Distribution for {selected_name}")
     shift_counts = df_person["Shift"].value_counts()
     if show_percentage:
@@ -174,7 +162,6 @@ def main_data_page():
     ax.legend()
     st.pyplot(fig)
     
-    # ------------------- PLOT 2: WEEKDAY VS. WEEKEND -----------------------
     st.subheader(f"Weekday vs. Weekend Shifts for {selected_name}")
     df_person["Day"] = df_person["Date"].dt.day_name()
     total_shifts = len(df_person)
@@ -225,50 +212,54 @@ def admin_time_page():
         return
     
     df_melted = st.session_state["df_melted"]
-    
-    # ------------------- SIDEBAR FILTERS -----------------------
+
+    # Sidebar: Date range filter
     st.sidebar.header("Administrative Time Filters")
     min_date = df_melted["Date"].min()
     max_date = df_melted["Date"].max()
     start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date])
     
-    # Filter the data based on the selected date range
+    # Sidebar: Enter admin hour values for each shift (default values are current)
+    st.sidebar.header("Administration Hour Values (out of 10)")
+    admin_cst = st.sidebar.number_input("CST:", value=10, min_value=0, max_value=10, step=1)
+    admin_hb_ic_pm = st.sidebar.number_input("HB IC PM:", value=3, min_value=0, max_value=10, step=1)
+    admin_hb_21c_pm = st.sidebar.number_input("HB 21C PM:", value=3, min_value=0, max_value=10, step=1)
+    admin_mic = st.sidebar.number_input("MIC:", value=5, min_value=0, max_value=10, step=1)
+    admin_hb_am = st.sidebar.number_input("HB AM EDSTTA / HB IC AM (weekdays only):", value=5, min_value=0, max_value=10, step=1)
+    
+    # Create a dictionary for admin hours per shift
+    admin_dict = {
+        "CST": admin_cst,
+        "HB IC PM": admin_hb_ic_pm,
+        "HB 21C PM": admin_hb_21c_pm,
+        "MIC": admin_mic,
+        "HB AM EDSTTA": admin_hb_am,
+        "HB IC AM": admin_hb_am
+    }
+    
+    # Filter data based on the selected date range
     df_filtered = df_melted[(df_melted["Date"] >= pd.Timestamp(start_date)) &
                             (df_melted["Date"] <= pd.Timestamp(end_date))].copy()
     
-    # ------------------- CALCULATE ADMINISTRATIVE HOURS -----------------------
+    # Calculate administrative hours per record based on custom inputs
     def get_admin_hours(row):
-        """
-        Return the number of administrative hours (out of 10) based on the shift type.
-        - CST: 10 hours
-        - HB IC PM, HB 21C PM: 3 hours
-        - MIC: 5 hours
-        - HB AM EDSTTA, HB IC AM: 5 hours (only count on weekdays)
-        - Otherwise: 0 hours
-        """
         shift = row["Shift"]
-        if shift == "CST":
-            return 10
-        elif shift in ["HB IC PM", "HB 21C PM"]:
-            return 3
-        elif shift == "MIC":
-            return 5
-        elif shift in ["HB AM EDSTTA", "HB IC AM"]:
-            # Only count if the shift occurs on a weekday (Monday=0 to Friday=4)
-            return 5 if row["Date"].weekday() < 5 else 0
+        # For HB AM EDSTTA and HB IC AM, count only on weekdays
+        if shift in ["HB AM EDSTTA", "HB IC AM"]:
+            return admin_dict[shift] if row["Date"].weekday() < 5 else 0
+        elif shift in admin_dict:
+            return admin_dict[shift]
         else:
             return 0
 
-    # Compute the admin hours for each record
     df_filtered["AdminHours"] = df_filtered.apply(get_admin_hours, axis=1)
     
-    # ------------------- COMPUTE ADMINISTRATIVE TIME PERCENTAGES -----------------------
-    # Overall administrative percentage for all staff
+    # Calculate overall administrative percentage for all staff
     total_admin_hours_all = df_filtered["AdminHours"].sum()
     total_shifts_all = len(df_filtered)
     overall_admin_percentage = (total_admin_hours_all / (total_shifts_all * 10)) * 100 if total_shifts_all > 0 else 0
     
-    # ------------------- SELECTED STAFF MEMBER ADMINISTRATIVE TIME -----------------------
+    # Calculate for a selected staff member
     st.sidebar.header("Filter by Staff Member")
     names = df_filtered["Name"].unique()
     selected_name = st.sidebar.selectbox("Select a Name:", names)
@@ -277,7 +268,6 @@ def admin_time_page():
     total_shifts_staff = len(df_staff)
     staff_admin_percentage = (total_admin_hours_staff / (total_shifts_staff * 10)) * 100 if total_shifts_staff > 0 else 0
     
-    # ------------------- PLOT ADMINISTRATIVE TIME -----------------------
     st.subheader("Administrative Time Percentage")
     fig, ax = plt.subplots(figsize=(6, 4))
     categories = ["All Staff", selected_name]
@@ -286,7 +276,6 @@ def admin_time_page():
     ax.set_ylabel("Administrative Time (%)")
     ax.set_ylim(0, 100)
     ax.set_title("Total Administrative Time as Percentage")
-    # Annotate each bar with its percentage value
     for bar in bars:
         height = bar.get_height()
         ax.annotate(f'{height:.1f}%', xy=(bar.get_x() + bar.get_width()/2, height),
@@ -294,12 +283,94 @@ def admin_time_page():
     st.pyplot(fig)
 
 # =============================================================================
+#                    PAGE 4: ADMIN COMPARISON GRAPH
+# =============================================================================
+def admin_comparison_page():
+    st.title("Administrative Time Comparison (All Staff)")
+    
+    if "df_melted" not in st.session_state or st.session_state["df_melted"] is None:
+        st.error("No file uploaded yet. Please navigate to the 'Upload File' page and upload a file.")
+        return
+    
+    df_melted = st.session_state["df_melted"]
+    
+    st.sidebar.header("Admin Comparison Filters")
+    min_date = df_melted["Date"].min()
+    max_date = df_melted["Date"].max()
+    start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date], key="admin_compare_date")
+    
+    # Sidebar: Enter admin hour values for each shift (default values)
+    st.sidebar.header("Administration Hour Values (out of 10)")
+    admin_cst = st.sidebar.number_input("CST:", value=10, min_value=0, max_value=10, step=1, key="cmp_cst")
+    admin_hb_ic_pm = st.sidebar.number_input("HB IC PM:", value=3, min_value=0, max_value=10, step=1, key="cmp_ic_pm")
+    admin_hb_21c_pm = st.sidebar.number_input("HB 21C PM:", value=3, min_value=0, max_value=10, step=1, key="cmp_21c_pm")
+    admin_mic = st.sidebar.number_input("MIC:", value=5, min_value=0, max_value=10, step=1, key="cmp_mic")
+    admin_hb_am = st.sidebar.number_input("HB AM EDSTTA / HB IC AM (weekdays only):", value=5, min_value=0, max_value=10, step=1, key="cmp_hb_am")
+    
+    admin_dict = {
+        "CST": admin_cst,
+        "HB IC PM": admin_hb_ic_pm,
+        "HB 21C PM": admin_hb_21c_pm,
+        "MIC": admin_mic,
+        "HB AM EDSTTA": admin_hb_am,
+        "HB IC AM": admin_hb_am
+    }
+    
+    # Filter the data based on date range
+    df_filtered = df_melted[(df_melted["Date"] >= pd.Timestamp(start_date)) &
+                            (df_melted["Date"] <= pd.Timestamp(end_date))].copy()
+    
+    # Calculate admin hours for each record
+    def get_admin_hours(row):
+        shift = row["Shift"]
+        if shift in ["HB AM EDSTTA", "HB IC AM"]:
+            return admin_dict[shift] if row["Date"].weekday() < 5 else 0
+        elif shift in admin_dict:
+            return admin_dict[shift]
+        else:
+            return 0
+    df_filtered["AdminHours"] = df_filtered.apply(get_admin_hours, axis=1)
+    
+    # Calculate the administrative percentage for each user
+    admin_percentages = {}
+    for name, group in df_filtered.groupby("Name"):
+        total_admin = group["AdminHours"].sum()
+        total_shifts = len(group)
+        percentage = (total_admin / (total_shifts * 10)) * 100 if total_shifts > 0 else 0
+        admin_percentages[name] = percentage
+    admin_df = pd.DataFrame(list(admin_percentages.items()), columns=["Name", "AdminPercentage"])
+    
+    # Sidebar: Select which users to display (checkboxes)
+    st.sidebar.header("Select Users to Display")
+    all_names = admin_df["Name"].tolist()
+    selected_users = []
+    for name in all_names:
+        if st.sidebar.checkbox(name, value=True, key=f"cmp_{name}"):
+            selected_users.append(name)
+    
+    # Filter the DataFrame based on selected users
+    admin_df = admin_df[admin_df["Name"].isin(selected_users)]
+    
+    # Plot the comparison graph
+    st.subheader("Administrative Time Percentage by User")
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.bar(admin_df["Name"], admin_df["AdminPercentage"], color="purple")
+    ax.set_ylabel("Administrative Time (%)")
+    ax.set_xlabel("Staff Member")
+    ax.set_title("Admin Time Comparison Across Staff")
+    ax.set_ylim(0, 100)
+    plt.xticks(rotation=45, ha="right")
+    st.pyplot(fig)
+
+# =============================================================================
 #                            PAGE NAVIGATION
 # =============================================================================
-page = st.sidebar.radio("Navigation", ["Upload File", "Main Data", "Administrative Time"])
+page = st.sidebar.radio("Navigation", ["Upload File", "Main Data", "Administrative Time", "Admin Comparison"])
 if page == "Upload File":
     upload_page()
 elif page == "Main Data":
     main_data_page()
 elif page == "Administrative Time":
     admin_time_page()
+elif page == "Admin Comparison":
+    admin_comparison_page()
