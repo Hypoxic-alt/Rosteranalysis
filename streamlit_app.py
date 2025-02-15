@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
+import json
 
 # =============================================================================
 #            HELPER FUNCTION TO PROCESS THE UPLOADED FILE
@@ -64,22 +65,33 @@ def convert_to_direct_url(shareable_url):
     return f"https://drive.google.com/uc?export=download&id={file_id}"
 
 # =============================================================================
-#                          PAGE 1: UPLOAD FILE
+#                          PAGE 1: UPLOAD FILE & CONFIG IMPORT
 # =============================================================================
 def upload_page():
     st.title("Upload File")
     st.write("**Instructions:** Upload an Excel file exported from the Coreschedule grid view, or load one automatically from Google Drive.")
-
+    
+    # --- Option to import a saved admin configuration ---
+    st.subheader("Import Admin Configuration")
+    config_file = st.file_uploader("Upload a configuration JSON file", type=["json"], key="config_import")
+    if config_file is not None:
+        try:
+            config = json.load(config_file)
+            st.session_state["admin_config"] = config
+            st.success("Configuration imported successfully!")
+        except Exception as e:
+            st.error(f"Error loading configuration: {e}")
+    
     # --- Option 1: Manual file upload ---
-    uploaded_file = st.file_uploader("Upload an Excel file", type=["xlsx"])
+    uploaded_file = st.file_uploader("Upload an Excel file", type=["xlsx"], key="file_upload")
     if uploaded_file is not None:
         df_melted = process_file(uploaded_file)
         st.session_state["df_melted"] = df_melted
         st.success("File uploaded and processed successfully!")
-
+    
     st.markdown("---")
     st.write("**Or load the file automatically from Google Drive:**")
-    gdrive_link = st.text_input("Enter the Google Drive shareable URL:")
+    gdrive_link = st.text_input("Enter the Google Drive shareable URL:", key="gdrive_link")
     if st.button("Load File from Google Drive"):
         if gdrive_link:
             download_url = convert_to_direct_url(gdrive_link)
@@ -92,7 +104,7 @@ def upload_page():
                     st.error(f"Error processing file: {e}")
         else:
             st.error("Please enter a valid Google Drive URL.")
-
+    
     if "df_melted" in st.session_state:
         st.write("Preview of loaded data:")
         st.dataframe(st.session_state["df_melted"].head())
@@ -111,9 +123,9 @@ def main_data_page():
     st.sidebar.header("Main Data Filters")
     min_date = df_melted["Date"].min()
     max_date = df_melted["Date"].max()
-    start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date])
-    show_percentage = st.sidebar.checkbox("Show Percentages", value=True)
-    show_median = st.sidebar.checkbox("Show Median Comparison", value=True)
+    start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date], key="main_date")
+    show_percentage = st.sidebar.checkbox("Show Percentages", value=True, key="main_pct")
+    show_median = st.sidebar.checkbox("Show Median Comparison", value=True, key="main_median")
     
     df_filtered = df_melted[
         (df_melted["Date"] >= pd.Timestamp(start_date)) &
@@ -122,12 +134,12 @@ def main_data_page():
     
     st.sidebar.header("Filter Options")
     names = df_filtered["Name"].unique()
-    selected_name = st.sidebar.selectbox("Select a Name:", names)
+    selected_name = st.sidebar.selectbox("Select a Name:", names, key="main_name")
     df_person = df_filtered[df_filtered["Name"] == selected_name]
     
     st.sidebar.header("Select Shifts to Display")
     shift_options = sorted(df_person["Shift"].unique())
-    selected_shifts = {shift: st.sidebar.checkbox(shift, value=True) for shift in shift_options}
+    selected_shifts = {shift: st.sidebar.checkbox(shift, value=True, key=f"main_shift_{shift}") for shift in shift_options}
     active_shifts = [shift for shift, selected in selected_shifts.items() if selected]
     df_person = df_person[df_person["Shift"].isin(active_shifts)]
     
@@ -205,7 +217,7 @@ def admin_config_page():
     st.title("Admin Configuration")
     st.write("Set the administration hour values for each shift and toggle shifts on or off. "
              "These settings will be used in all admin calculations.")
-
+    
     if "df_melted" not in st.session_state:
         st.error("No file uploaded yet. Please navigate to the 'Upload File' page and upload a file.")
         return
@@ -228,19 +240,22 @@ def admin_config_page():
     for shift in unique_shifts:
         col1, col2 = st.columns([1,1])
         with col1:
-            include = st.checkbox(f"Include {shift}", value=True, key=f"include_{shift}")
+            include = st.checkbox(f"Include {shift}", value=st.session_state.get(f"include_{shift}", True), key=f"include_{shift}")
         with col2:
             default_val = default_values.get(shift, 0)
-            hours = st.number_input(f"{shift} admin hours (out of 10):", value=default_val, min_value=0, max_value=10, step=1, key=f"value_{shift}")
+            hours = st.number_input(f"{shift} admin hours (out of 10):", value=st.session_state.get(f"value_{shift}", default_val), min_value=0, max_value=10, step=1, key=f"value_{shift}")
         # Only include the shift if enabled; otherwise, set to 0.
         admin_config[shift] = hours if include else 0
 
     # Store the configuration in session_state so other pages can use it.
     st.session_state["admin_config"] = admin_config
     st.success("Admin configuration updated!")
-
     st.write("Current configuration:")
-    st.write(admin_config)
+    st.json(admin_config)
+    
+    # Provide a download button to export configuration as a JSON file.
+    config_json = json.dumps(admin_config, indent=4)
+    st.download_button("Export Configuration", data=config_json, file_name="admin_config.json", mime="application/json")
 
 # =============================================================================
 #                    PAGE 4: ADMINISTRATIVE TIME ANALYSIS
@@ -259,7 +274,7 @@ def admin_time_page():
     st.sidebar.header("Administrative Time Filters")
     min_date = df_melted["Date"].min()
     max_date = df_melted["Date"].max()
-    start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date])
+    start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date], key="admin_time_date")
     
     df_filtered = df_melted[(df_melted["Date"] >= pd.Timestamp(start_date)) &
                             (df_melted["Date"] <= pd.Timestamp(end_date))].copy()
@@ -281,7 +296,7 @@ def admin_time_page():
     
     st.sidebar.header("Filter by Staff Member")
     names = df_filtered["Name"].unique()
-    selected_name = st.sidebar.selectbox("Select a Name:", names)
+    selected_name = st.sidebar.selectbox("Select a Name:", names, key="admin_time_name")
     df_staff = df_filtered[df_filtered["Name"] == selected_name]
     total_admin_hours_staff = df_staff["AdminHours"].sum()
     total_shifts_staff = len(df_staff)
@@ -318,7 +333,7 @@ def admin_comparison_page():
     st.sidebar.header("Admin Comparison Filters")
     min_date = df_melted["Date"].min()
     max_date = df_melted["Date"].max()
-    start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date], key="admin_compare_date")
+    start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date], key="admin_cmp_date")
     
     df_filtered = df_melted[(df_melted["Date"] >= pd.Timestamp(start_date)) &
                             (df_melted["Date"] <= pd.Timestamp(end_date))].copy()
@@ -344,7 +359,8 @@ def admin_comparison_page():
     all_names = admin_df["Name"].tolist()
     selected_users = []
     for name in all_names:
-        if st.sidebar.checkbox(name, value=True, key=f"cmp_{name}"):
+        default_val = st.session_state.get(f"cmp_{name}", True)
+        if st.sidebar.checkbox(name, value=default_val, key=f"cmp_{name}"):
             selected_users.append(name)
     admin_df = admin_df[admin_df["Name"].isin(selected_users)]
     
