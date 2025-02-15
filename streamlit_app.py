@@ -270,14 +270,11 @@ def admin_time_page():
     )
     grouped["AdminPercentage"] = (grouped["TotalAdminHours"] / (grouped["TotalShifts"] * 10)) * 100
     
-    # ------------------- SELECT USERS TO DISPLAY WITH "SELECT ALL" OPTION -----------------------
-    st.sidebar.header("Select Users")
-    all_users = list(grouped.index)
-    select_all = st.sidebar.checkbox("Select All Users", value=True)
-    if select_all:
-        selected_users = all_users
-    else:
-        selected_users = st.sidebar.multiselect("Select Staff Members:", all_users, default=[])
+    # ------------------- SELECT USERS TO DISPLAY (EXCLUDING THOSE WITH "JNR") -----------------------
+    # Exclude users with "JNR" in their name.
+    all_users = [user for user in grouped.index if "JNR" not in user]
+    # Use a multiselect widget with default = all_users.
+    selected_users = st.sidebar.multiselect("Select Staff Members:", all_users, default=all_users)
     
     # Filter the grouped DataFrame to only the selected users.
     display_df = grouped.loc[selected_users]
