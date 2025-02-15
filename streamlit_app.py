@@ -276,6 +276,9 @@ def admin_time_page():
     # Use a multiselect widget with default set to all remaining users.
     selected_users = st.sidebar.multiselect("Select Staff Members:", all_users, default=all_users)
     
+    # IMPORTANT: Define display_df from the grouped data for the selected users.
+    display_df = grouped.loc[selected_users]
+    
     # ------------------- PLOT ADMINISTRATIVE TIME PERCENTAGE -----------------------
     # Checkbox to choose whether to display percentage annotations above each bar
     show_annotations = st.sidebar.checkbox("Show Percentage Annotations", value=True)
@@ -302,6 +305,7 @@ def admin_time_page():
                         ha='center', va='bottom')
     
     st.pyplot(fig)
+
 
 # =============================================================================
 #                            PAGE NAVIGATION
