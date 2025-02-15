@@ -231,7 +231,7 @@ def admin_time_page():
     max_date = df_melted["Date"].max()
     start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date])
     
-    # Filter the data based on the selected date range
+    # Filter data based on the selected date range
     df_filtered = df_melted[
         (df_melted["Date"] >= pd.Timestamp(start_date)) &
         (df_melted["Date"] <= pd.Timestamp(end_date))
@@ -239,14 +239,6 @@ def admin_time_page():
     
     # ------------------- CALCULATE ADMINISTRATIVE HOURS -----------------------
     def get_admin_hours(row):
-        """
-        Return the number of administrative hours (out of 10) based on the shift type.
-        - CST: 10 hours
-        - HB IC PM, HB 21C PM: 3 hours
-        - MIC: 5 hours
-        - HB AM EDSTTA, HB IC AM: 5 hours (only count on weekdays)
-        - Otherwise: 0 hours
-        """
         shift = row["Shift"]
         if shift == "CST":
             return 10
@@ -259,30 +251,33 @@ def admin_time_page():
         else:
             return 0
 
-    # Compute the administrative hours for each record.
     df_filtered["AdminHours"] = df_filtered.apply(get_admin_hours, axis=1)
     
-    # ------------------- COMPUTE ADMINISTRATIVE TIME PERCENTAGE PER USER -----------------------
-    # Group by "Name" and calculate total admin hours and total shifts per user.
     grouped = df_filtered.groupby("Name").agg(
-        TotalAdminHours = pd.NamedAgg(column="AdminHours", aggfunc="sum"),
-        TotalShifts = pd.NamedAgg(column="Shift", aggfunc="count")
+        TotalAdminHours=pd.NamedAgg(column="AdminHours", aggfunc="sum"),
+        TotalShifts=pd.NamedAgg(column="Shift", aggfunc="count")
     )
     grouped["AdminPercentage"] = (grouped["TotalAdminHours"] / (grouped["TotalShifts"] * 10)) * 100
     
-    # ------------------- SELECT USERS TO DISPLAY (EXCLUDING THOSE WITH "JNR") -----------------------
+    # ------------------- NEW TOGGLES ABOVE USER SELECT -----------------------
+    include_only_CST = st.sidebar.checkbox("Include only users with at least one CST shift", value=False)
+    show_annotations = st.sidebar.checkbox("Show Percentage Annotations", value=True)
+    
+    # ------------------- SELECT USERS TO DISPLAY -----------------------
     # Exclude users with "JNR" in their name.
-    all_users = [user for user in grouped.index if "JNR" not in user]
-    # Use a multiselect widget with default set to all remaining users.
+    if include_only_CST:
+        # Identify users with at least one "CST" shift.
+        cst_users = df_filtered.groupby("Name")["Shift"].apply(lambda x: (x == "CST").any())
+        cst_users = cst_users[cst_users].index.tolist()
+        all_users = [user for user in grouped.index if "JNR" not in user and user in cst_users]
+    else:
+        all_users = [user for user in grouped.index if "JNR" not in user]
+    
     selected_users = st.sidebar.multiselect("Select Staff Members:", all_users, default=all_users)
     
-    # IMPORTANT: Define display_df from the grouped data for the selected users.
     display_df = grouped.loc[selected_users]
     
     # ------------------- PLOT ADMINISTRATIVE TIME PERCENTAGE -----------------------
-    # Checkbox to choose whether to display percentage annotations above each bar
-    show_annotations = st.sidebar.checkbox("Show Percentage Annotations", value=True)
-    
     st.subheader("Administrative Time Percentage by Staff Member")
     fig, ax = plt.subplots(figsize=(8, 5))
     
@@ -291,11 +286,10 @@ def admin_time_page():
     ax.set_ylim(0, 100)
     ax.set_title("Administrative Time Percentage for Selected Staff Members")
     
-    # Rotate x-axis labels to 45 degrees
+    # Rotate x-axis labels to 45° for better readability.
     ax.set_xticks(range(len(display_df.index)))
     ax.set_xticklabels(display_df.index, rotation=45, ha="right")
     
-    # Optionally annotate each bar with its percentage value
     if show_annotations:
         for bar in bars:
             height = bar.get_height()
@@ -305,7 +299,6 @@ def admin_time_page():
                         ha='center', va='bottom')
     
     st.pyplot(fig)
-
 
 # =============================================================================
 #                            PAGE NAVIGATION
