@@ -70,25 +70,6 @@ def convert_to_direct_url(shareable_url):
     return f"https://drive.google.com/uc?export=download&id={file_id}"
 
 # =============================================================================
-#      HELPER FUNCTION TO CONVERT GOOGLE SHEETS URL TO EXCEL DOWNLOAD URL
-# =============================================================================
-def convert_google_sheets_to_excel_url(sheets_url):
-    """
-    Convert a Google Sheets shareable URL into a direct download URL that exports
-    the file as an Excel (.xlsx) file.
-    For example, for a URL of the form:
-      https://docs.google.com/spreadsheets/d/FILE_ID/edit?usp=drive_link...
-    This function returns:
-      https://docs.google.com/spreadsheets/d/FILE_ID/export?format=xlsx
-    """
-    try:
-        file_id = sheets_url.split('/d/')[1].split('/')[0]
-    except IndexError:
-        st.error("The provided URL does not appear to be a valid Google Sheets link.")
-        return None
-    return f"https://docs.google.com/spreadsheets/d/{file_id}/export?format=xlsx"
-
-# =============================================================================
 #                          PAGE 1: UPLOAD FILE
 # =============================================================================
 def upload_page():
@@ -106,6 +87,7 @@ def upload_page():
     st.write("**Or load the file automatically from Google Drive:**")
 
     # --- Option 2: Load from Google Drive via copy-paste link ---
+    # Text input for the user to paste the Google Drive shareable URL.
     gdrive_link = st.text_input("Enter the Google Drive shareable URL:")
     if st.button("Load File from Google Drive"):
         if gdrive_link:
@@ -119,25 +101,6 @@ def upload_page():
                     st.error(f"Error processing file: {e}")
         else:
             st.error("Please enter a valid Google Drive URL.")
-
-    st.markdown("---")
-    st.write("**Or load the default file:**")
-    # --- Option 3: Load default file with password protection ---
-    # Password field for default load
-    default_password = st.text_input("Enter password for default file", type="password")
-    if st.button("Load Default File"):
-        if default_password == "default123":
-            default_link = "https://docs.google.com/spreadsheets/d/1wIgi9m25g9H1A2CkJyi0DqfX5o1NQXA7/edit?usp=drive_link&ouid=103703131263312948433&rtpof=true&sd=true"
-            download_url = convert_google_sheets_to_excel_url(default_link)
-            if download_url:
-                try:
-                    df_melted = process_file(download_url)
-                    st.session_state["df_melted"] = df_melted
-                    st.success("Default file loaded successfully!")
-                except Exception as e:
-                    st.error(f"Error processing default file: {e}")
-        else:
-            st.error("Incorrect password for default file.")
 
     # Optionally display a preview if data has been loaded
     if "df_melted" in st.session_state:
@@ -291,6 +254,7 @@ def admin_time_page():
         elif shift == "MIC":
             return 5
         elif shift in ["HB AM EDSTTA", "HB IC AM"]:
+            # Only count if the shift occurs on a weekday (Monday=0 to Friday=4)
             return 5 if row["Date"].weekday() < 5 else 0
         else:
             return 0
