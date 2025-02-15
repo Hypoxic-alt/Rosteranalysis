@@ -101,6 +101,7 @@ def upload_page():
         else:
             st.error("Please enter a valid Google Drive URL.")
 
+    # Optionally display a preview if data has been loaded
     if "df_melted" in st.session_state:
         st.write("Preview of loaded data:")
         st.dataframe(st.session_state["df_melted"].head())
@@ -213,10 +214,10 @@ def main_data_page():
     st.pyplot(fig)
 
 # =============================================================================
-#           PAGE 3: ADMINISTRATIVE TIME ANALYSIS BY USER
+#                    PAGE 3: ADMINISTRATIVE TIME ANALYSIS
 # =============================================================================
 def admin_time_page():
-    st.title("Administrative Time Analysis by User")
+    st.title("Administrative Time Analysis")
     
     if "df_melted" not in st.session_state or st.session_state["df_melted"] is None:
         st.error("No file uploaded yet. Please navigate to the 'Upload File' page and upload a file.")
@@ -258,42 +259,35 @@ def admin_time_page():
         else:
             return 0
 
+    # Compute the administrative hours for each record.
     df_filtered["AdminHours"] = df_filtered.apply(get_admin_hours, axis=1)
     
-    # ------------------- PREPARE USER LIST -----------------------
-    # Remove any user names that contain "JNR" (case-insensitive)
-    df_filtered = df_filtered[~df_filtered["Name"].str.contains("JNR", case=False, na=False)]
-    all_users = sorted(df_filtered["Name"].unique())
+    # ------------------- COMPUTE ADMINISTRATIVE TIME PERCENTAGE PER USER -----------------------
+    # Group by "Name" and calculate total admin hours and total shifts per user.
+    grouped = df_filtered.groupby("Name").agg(
+        TotalAdminHours = pd.NamedAgg(column="AdminHours", aggfunc="sum"),
+        TotalShifts = pd.NamedAgg(column="Shift", aggfunc="count")
+    )
+    grouped["AdminPercentage"] = (grouped["TotalAdminHours"] / (grouped["TotalShifts"] * 10)) * 100
     
-    # Multiselect for user selection (alphabetical order)
-    selected_users = st.sidebar.multiselect("Select Users", options=all_users, default=all_users)
+    # ------------------- SELECT USERS TO DISPLAY -----------------------
+    st.sidebar.header("Select Users")
+    all_users = list(grouped.index)
+    selected_users = st.sidebar.multiselect("Select Staff Members:", all_users, default=all_users)
     
-    if not selected_users:
-        st.warning("Please select at least one user.")
-        return
+    # Filter the grouped DataFrame to only the selected users.
+    display_df = grouped.loc[selected_users]
     
-    # ------------------- COMPUTE ADMINISTRATIVE PERCENTAGES PER USER -----------------------
-    user_groups = df_filtered[df_filtered["Name"].isin(selected_users)].groupby("Name")
-    admin_percentages = {}
-    for name, group in user_groups:
-        total_admin_hours = group["AdminHours"].sum()
-        total_shifts = len(group)
-        percentage = (total_admin_hours / (total_shifts * 10)) * 100 if total_shifts > 0 else 0
-        admin_percentages[name] = percentage
+    # ------------------- PLOT ADMINISTRATIVE TIME PERCENTAGE -----------------------
+    st.subheader("Administrative Time Percentage by Staff Member")
+    fig, ax = plt.subplots(figsize=(8, 5))
     
-    admin_df = pd.DataFrame(list(admin_percentages.items()), columns=["Name", "AdminPercentage"]).sort_values("Name")
-    
-    # ------------------- PLOT ADMINISTRATIVE TIME BY USER -----------------------
-    st.subheader("Administrative Time Percentage by User")
-    fig, ax = plt.subplots(figsize=(10, 5))
-    bars = ax.bar(admin_df["Name"], admin_df["AdminPercentage"], color="skyblue")
-    
-    ax.set_xlabel("User")
+    bars = ax.bar(display_df.index, display_df["AdminPercentage"], color="skyblue")
     ax.set_ylabel("Administrative Time (%)")
     ax.set_ylim(0, 100)
-    ax.set_title("Administrative Time as Percentage per User")
-    plt.xticks(rotation=45, ha="right")
+    ax.set_title("Administrative Time Percentage for Selected Staff Members")
     
+    # Annotate each bar with its percentage value
     for bar in bars:
         height = bar.get_height()
         ax.annotate(f'{height:.1f}%', xy=(bar.get_x() + bar.get_width()/2, height),
