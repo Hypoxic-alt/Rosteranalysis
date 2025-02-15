@@ -2,27 +2,32 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
-import json
 
 # =============================================================================
 #            HELPER FUNCTION TO PROCESS THE UPLOADED FILE
 # =============================================================================
 def process_file(source):
     """
-    Process the Excel file from the given source (a file-like object or a URL)
-    and return a melted DataFrame with columns: 'Name', 'Date', 'Shift'.
+    Process the Excel file from the given source (which can be a file-like object
+    or a URL) and return a melted DataFrame with columns: 'Name', 'Date', 'Shift'.
     """
+    # Read the Excel file from the source and select the first sheet
     df = pd.ExcelFile(source)
     sheet_name = df.sheet_names[0]
     df = pd.read_excel(df, sheet_name=sheet_name, header=None)
 
     # ----------------- DATA CLEANING & PREPARATION ---------------------------
+    # Assume data starts at row 3 (0-indexed row 3)
     df_cleaned = df.iloc[3:].reset_index(drop=True)
+    # Row 1 (index 1) contains headers (names and dates)
     df_cleaned.columns = df.iloc[1]
+    # Rename the first column to "Name"
     df_cleaned.rename(columns={df_cleaned.columns[0]: "Name"}, inplace=True)
+    # Drop any completely empty columns
     df_cleaned = df_cleaned.dropna(axis=1, how='all')
 
     # ----------------- DATE EXTRACTION & CORRECTION --------------------------
+    # Extract date strings from row 3 (index 2) and append a default year (2024)
     date_strings = df.iloc[2, 1:].dropna().astype(str) + "-2024"
     corrected_dates = []
     current_year = 2024
@@ -53,7 +58,7 @@ def process_file(source):
 def convert_to_direct_url(shareable_url):
     """
     Convert a Google Drive shareable URL to a direct download URL.
-    Example:
+    For example:
       Shareable URL: https://drive.google.com/file/d/FILE_ID/view?usp=sharing
       Direct download URL: https://drive.google.com/uc?export=download&id=FILE_ID
     """
@@ -65,33 +70,25 @@ def convert_to_direct_url(shareable_url):
     return f"https://drive.google.com/uc?export=download&id={file_id}"
 
 # =============================================================================
-#                          PAGE 1: UPLOAD FILE & CONFIG IMPORT
+#                          PAGE 1: UPLOAD FILE
 # =============================================================================
 def upload_page():
     st.title("Upload File")
     st.write("**Instructions:** Upload an Excel file exported from the Coreschedule grid view, or load one automatically from Google Drive.")
-    
-    # --- Option to import a saved admin configuration ---
-    st.subheader("Import Admin Configuration")
-    config_file = st.file_uploader("Upload a configuration JSON file", type=["json"], key="config_import")
-    if config_file is not None:
-        try:
-            config = json.load(config_file)
-            st.session_state["admin_config"] = config
-            st.success("Configuration imported successfully!")
-        except Exception as e:
-            st.error(f"Error loading configuration: {e}")
-    
+
     # --- Option 1: Manual file upload ---
-    uploaded_file = st.file_uploader("Upload an Excel file", type=["xlsx"], key="file_upload")
+    uploaded_file = st.file_uploader("Upload an Excel file", type=["xlsx"])
     if uploaded_file is not None:
         df_melted = process_file(uploaded_file)
         st.session_state["df_melted"] = df_melted
         st.success("File uploaded and processed successfully!")
-    
+
     st.markdown("---")
     st.write("**Or load the file automatically from Google Drive:**")
-    gdrive_link = st.text_input("Enter the Google Drive shareable URL:", key="gdrive_link")
+
+    # --- Option 2: Load from Google Drive via copy-paste link ---
+    # Text input for the user to paste the Google Drive shareable URL.
+    gdrive_link = st.text_input("Enter the Google Drive shareable URL:")
     if st.button("Load File from Google Drive"):
         if gdrive_link:
             download_url = convert_to_direct_url(gdrive_link)
@@ -104,7 +101,8 @@ def upload_page():
                     st.error(f"Error processing file: {e}")
         else:
             st.error("Please enter a valid Google Drive URL.")
-    
+
+    # Optionally display a preview if data has been loaded
     if "df_melted" in st.session_state:
         st.write("Preview of loaded data:")
         st.dataframe(st.session_state["df_melted"].head())
@@ -115,34 +113,39 @@ def upload_page():
 def main_data_page():
     st.title("Main Data")
     
-    if "df_melted" not in st.session_state:
+    if "df_melted" not in st.session_state or st.session_state["df_melted"] is None:
         st.error("No file uploaded yet. Please navigate to the 'Upload File' page and upload a file.")
         return
     
     df_melted = st.session_state["df_melted"]
+
+    # ------------------- SIDEBAR FILTERS -----------------------
     st.sidebar.header("Main Data Filters")
     min_date = df_melted["Date"].min()
     max_date = df_melted["Date"].max()
-    start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date], key="main_date")
-    show_percentage = st.sidebar.checkbox("Show Percentages", value=True, key="main_pct")
-    show_median = st.sidebar.checkbox("Show Median Comparison", value=True, key="main_median")
+    start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date])
+    show_percentage = st.sidebar.checkbox("Show Percentages", value=True)
+    show_median = st.sidebar.checkbox("Show Median Comparison", value=True)
     
+    # Apply date filter
     df_filtered = df_melted[
         (df_melted["Date"] >= pd.Timestamp(start_date)) &
         (df_melted["Date"] <= pd.Timestamp(end_date))
     ]
     
+    # ------------------- FILTER BY NAME & SHIFT -----------------------
     st.sidebar.header("Filter Options")
     names = df_filtered["Name"].unique()
-    selected_name = st.sidebar.selectbox("Select a Name:", names, key="main_name")
+    selected_name = st.sidebar.selectbox("Select a Name:", names)
     df_person = df_filtered[df_filtered["Name"] == selected_name]
     
     st.sidebar.header("Select Shifts to Display")
     shift_options = sorted(df_person["Shift"].unique())
-    selected_shifts = {shift: st.sidebar.checkbox(shift, value=True, key=f"main_shift_{shift}") for shift in shift_options}
+    selected_shifts = {shift: st.sidebar.checkbox(shift, value=True) for shift in shift_options}
     active_shifts = [shift for shift, selected in selected_shifts.items() if selected]
     df_person = df_person[df_person["Shift"].isin(active_shifts)]
     
+    # ------------------- PLOT 1: SHIFT DISTRIBUTION -----------------------
     st.subheader(f"Shift Distribution for {selected_name}")
     shift_counts = df_person["Shift"].value_counts()
     if show_percentage:
@@ -171,6 +174,7 @@ def main_data_page():
     ax.legend()
     st.pyplot(fig)
     
+    # ------------------- PLOT 2: WEEKDAY VS. WEEKEND -----------------------
     st.subheader(f"Weekday vs. Weekend Shifts for {selected_name}")
     df_person["Day"] = df_person["Date"].dt.day_name()
     total_shifts = len(df_person)
@@ -211,97 +215,69 @@ def main_data_page():
     st.pyplot(fig)
 
 # =============================================================================
-#                   PAGE 3: ADMIN CONFIGURATION
-# =============================================================================
-def admin_config_page():
-    st.title("Admin Configuration")
-    st.write("Set the administration hour values for each shift and toggle shifts on or off. "
-             "These settings will be used in all admin calculations.")
-    
-    if "df_melted" not in st.session_state:
-        st.error("No file uploaded yet. Please navigate to the 'Upload File' page and upload a file.")
-        return
-
-    df_melted = st.session_state["df_melted"]
-    unique_shifts = sorted(df_melted["Shift"].unique())
-    
-    st.write("For each shift, set the number of admin hours (out of 10). Uncheck the box to disable that shift from admin calculations.")
-    # Default values for known shifts; default to 0 for others.
-    default_values = {
-        "CST": 10,
-        "HB IC PM": 3,
-        "HB 21C PM": 3,
-        "MIC": 5,
-        "HB AM EDSTTA": 5,
-        "HB IC AM": 5
-    }
-    
-    admin_config = {}
-    for shift in unique_shifts:
-        col1, col2 = st.columns([1,1])
-        with col1:
-            include = st.checkbox(f"Include {shift}", value=st.session_state.get(f"include_{shift}", True), key=f"include_{shift}")
-        with col2:
-            default_val = default_values.get(shift, 0)
-            hours = st.number_input(f"{shift} admin hours (out of 10):", value=st.session_state.get(f"value_{shift}", default_val), min_value=0, max_value=10, step=1, key=f"value_{shift}")
-        # Only include the shift if enabled; otherwise, set to 0.
-        admin_config[shift] = hours if include else 0
-
-    # Store the configuration in session_state so other pages can use it.
-    st.session_state["admin_config"] = admin_config
-    st.success("Admin configuration updated!")
-    st.write("Current configuration:")
-    st.json(admin_config)
-    
-    # Provide a download button to export configuration as a JSON file.
-    config_json = json.dumps(admin_config, indent=4)
-    st.download_button("Export Configuration", data=config_json, file_name="admin_config.json", mime="application/json")
-
-# =============================================================================
-#                    PAGE 4: ADMINISTRATIVE TIME ANALYSIS
+#                    PAGE 3: ADMINISTRATIVE TIME ANALYSIS
 # =============================================================================
 def admin_time_page():
     st.title("Administrative Time Analysis")
     
-    if "df_melted" not in st.session_state:
+    if "df_melted" not in st.session_state or st.session_state["df_melted"] is None:
         st.error("No file uploaded yet. Please navigate to the 'Upload File' page and upload a file.")
         return
     
-    # Use admin configuration from session_state; if not set, use an empty dict.
-    admin_config = st.session_state.get("admin_config", {})
-    
     df_melted = st.session_state["df_melted"]
+    
+    # ------------------- SIDEBAR FILTERS -----------------------
     st.sidebar.header("Administrative Time Filters")
     min_date = df_melted["Date"].min()
     max_date = df_melted["Date"].max()
-    start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date], key="admin_time_date")
+    start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date])
     
+    # Filter the data based on the selected date range
     df_filtered = df_melted[(df_melted["Date"] >= pd.Timestamp(start_date)) &
                             (df_melted["Date"] <= pd.Timestamp(end_date))].copy()
     
-    # Calculate admin hours per record using the configuration.
+    # ------------------- CALCULATE ADMINISTRATIVE HOURS -----------------------
     def get_admin_hours(row):
+        """
+        Return the number of administrative hours (out of 10) based on the shift type.
+        - CST: 10 hours
+        - HB IC PM, HB 21C PM: 3 hours
+        - MIC: 5 hours
+        - HB AM EDSTTA, HB IC AM: 5 hours (only count on weekdays)
+        - Otherwise: 0 hours
+        """
         shift = row["Shift"]
-        # For HB AM EDSTTA and HB IC AM, count only on weekdays.
-        if shift in ["HB AM EDSTTA", "HB IC AM"]:
-            return admin_config.get(shift, 0) if row["Date"].weekday() < 5 else 0
+        if shift == "CST":
+            return 10
+        elif shift in ["HB IC PM", "HB 21C PM"]:
+            return 3
+        elif shift == "MIC":
+            return 5
+        elif shift in ["HB AM EDSTTA", "HB IC AM"]:
+            # Only count if the shift occurs on a weekday (Monday=0 to Friday=4)
+            return 5 if row["Date"].weekday() < 5 else 0
         else:
-            return admin_config.get(shift, 0)
-    
+            return 0
+
+    # Compute the admin hours for each record
     df_filtered["AdminHours"] = df_filtered.apply(get_admin_hours, axis=1)
     
+    # ------------------- COMPUTE ADMINISTRATIVE TIME PERCENTAGES -----------------------
+    # Overall administrative percentage for all staff
     total_admin_hours_all = df_filtered["AdminHours"].sum()
     total_shifts_all = len(df_filtered)
     overall_admin_percentage = (total_admin_hours_all / (total_shifts_all * 10)) * 100 if total_shifts_all > 0 else 0
     
+    # ------------------- SELECTED STAFF MEMBER ADMINISTRATIVE TIME -----------------------
     st.sidebar.header("Filter by Staff Member")
     names = df_filtered["Name"].unique()
-    selected_name = st.sidebar.selectbox("Select a Name:", names, key="admin_time_name")
+    selected_name = st.sidebar.selectbox("Select a Name:", names)
     df_staff = df_filtered[df_filtered["Name"] == selected_name]
     total_admin_hours_staff = df_staff["AdminHours"].sum()
     total_shifts_staff = len(df_staff)
     staff_admin_percentage = (total_admin_hours_staff / (total_shifts_staff * 10)) * 100 if total_shifts_staff > 0 else 0
     
+    # ------------------- PLOT ADMINISTRATIVE TIME -----------------------
     st.subheader("Administrative Time Percentage")
     fig, ax = plt.subplots(figsize=(6, 4))
     categories = ["All Staff", selected_name]
@@ -310,6 +286,7 @@ def admin_time_page():
     ax.set_ylabel("Administrative Time (%)")
     ax.set_ylim(0, 100)
     ax.set_title("Total Administrative Time as Percentage")
+    # Annotate each bar with its percentage value
     for bar in bars:
         height = bar.get_height()
         ax.annotate(f'{height:.1f}%', xy=(bar.get_x() + bar.get_width()/2, height),
@@ -317,80 +294,12 @@ def admin_time_page():
     st.pyplot(fig)
 
 # =============================================================================
-#                    PAGE 5: ADMIN COMPARISON GRAPH
-# =============================================================================
-def admin_comparison_page():
-    st.title("Administrative Time Comparison (All Staff)")
-    
-    if "df_melted" not in st.session_state:
-        st.error("No file uploaded yet. Please navigate to the 'Upload File' page and upload a file.")
-        return
-    
-    # Use admin configuration from session_state.
-    admin_config = st.session_state.get("admin_config", {})
-    
-    df_melted = st.session_state["df_melted"]
-    st.sidebar.header("Admin Comparison Filters")
-    min_date = df_melted["Date"].min()
-    max_date = df_melted["Date"].max()
-    start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date], key="admin_cmp_date")
-    
-    df_filtered = df_melted[(df_melted["Date"] >= pd.Timestamp(start_date)) &
-                            (df_melted["Date"] <= pd.Timestamp(end_date))].copy()
-    
-    def get_admin_hours(row):
-        shift = row["Shift"]
-        if shift in ["HB AM EDSTTA", "HB IC AM"]:
-            return admin_config.get(shift, 0) if row["Date"].weekday() < 5 else 0
-        else:
-            return admin_config.get(shift, 0)
-    
-    df_filtered["AdminHours"] = df_filtered.apply(get_admin_hours, axis=1)
-    
-    admin_percentages = {}
-    for name, group in df_filtered.groupby("Name"):
-        total_admin = group["AdminHours"].sum()
-        total_shifts = len(group)
-        percentage = (total_admin / (total_shifts * 10)) * 100 if total_shifts > 0 else 0
-        admin_percentages[name] = percentage
-    admin_df = pd.DataFrame(list(admin_percentages.items()), columns=["Name", "AdminPercentage"])
-    
-    st.sidebar.header("Select Users to Display")
-    all_names = admin_df["Name"].tolist()
-    selected_users = []
-    for name in all_names:
-        default_val = st.session_state.get(f"cmp_{name}", True)
-        if st.sidebar.checkbox(name, value=default_val, key=f"cmp_{name}"):
-            selected_users.append(name)
-    admin_df = admin_df[admin_df["Name"].isin(selected_users)]
-    
-    st.subheader("Administrative Time Percentage by User")
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.bar(admin_df["Name"], admin_df["AdminPercentage"], color="purple")
-    ax.set_ylabel("Administrative Time (%)")
-    ax.set_xlabel("Staff Member")
-    ax.set_title("Admin Time Comparison Across Staff")
-    ax.set_ylim(0, 100)
-    plt.xticks(rotation=45, ha="right")
-    st.pyplot(fig)
-
-# =============================================================================
 #                            PAGE NAVIGATION
 # =============================================================================
-page = st.sidebar.radio("Navigation", [
-    "Upload File",
-    "Main Data",
-    "Admin Configuration",
-    "Administrative Time",
-    "Admin Comparison"
-])
+page = st.sidebar.radio("Navigation", ["Upload File", "Main Data", "Administrative Time"])
 if page == "Upload File":
     upload_page()
 elif page == "Main Data":
     main_data_page()
-elif page == "Admin Configuration":
-    admin_config_page()
 elif page == "Administrative Time":
     admin_time_page()
-elif page == "Admin Comparison":
-    admin_comparison_page()
