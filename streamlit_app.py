@@ -273,38 +273,35 @@ def admin_time_page():
     # ------------------- SELECT USERS TO DISPLAY (EXCLUDING THOSE WITH "JNR") -----------------------
     # Exclude users with "JNR" in their name.
     all_users = [user for user in grouped.index if "JNR" not in user]
-    # Use a multiselect widget with default = all_users.
+    # Use a multiselect widget with default set to all remaining users.
     selected_users = st.sidebar.multiselect("Select Staff Members:", all_users, default=all_users)
     
-    # Filter the grouped DataFrame to only the selected users.
-    display_df = grouped.loc[selected_users]
-    
     # ------------------- PLOT ADMINISTRATIVE TIME PERCENTAGE -----------------------
-    # Checkbox for toggling annotations
-show_annotations = st.sidebar.checkbox("Show Percentage Annotations", value=True)
-
-fig, ax = plt.subplots(figsize=(8, 5))
-
-bars = ax.bar(display_df.index, display_df["AdminPercentage"], color="skyblue")
-ax.set_ylabel("Administrative Time (%)")
-ax.set_ylim(0, 100)
-ax.set_title("Administrative Time Percentage for Selected Staff Members")
-
-# Rotate the x-axis labels to diagonal (45 degrees)
-ax.set_xticks(range(len(display_df.index)))
-ax.set_xticklabels(display_df.index, rotation=45, ha="right")
-
-# Optionally annotate the bars with their percentage values
-if show_annotations:
-    for bar in bars:
-        height = bar.get_height()
-        ax.annotate(f'{height:.1f}%', 
-                    xy=(bar.get_x() + bar.get_width() / 2, height),
-                    xytext=(0, 3),  # 3 points vertical offset
-                    textcoords="offset points",
-                    ha='center', va='bottom')
-
-st.pyplot(fig)
+    # Checkbox to choose whether to display percentage annotations above each bar
+    show_annotations = st.sidebar.checkbox("Show Percentage Annotations", value=True)
+    
+    st.subheader("Administrative Time Percentage by Staff Member")
+    fig, ax = plt.subplots(figsize=(8, 5))
+    
+    bars = ax.bar(display_df.index, display_df["AdminPercentage"], color="skyblue")
+    ax.set_ylabel("Administrative Time (%)")
+    ax.set_ylim(0, 100)
+    ax.set_title("Administrative Time Percentage for Selected Staff Members")
+    
+    # Rotate x-axis labels to 45 degrees
+    ax.set_xticks(range(len(display_df.index)))
+    ax.set_xticklabels(display_df.index, rotation=45, ha="right")
+    
+    # Optionally annotate each bar with its percentage value
+    if show_annotations:
+        for bar in bars:
+            height = bar.get_height()
+            ax.annotate(f'{height:.1f}%', 
+                        xy=(bar.get_x() + bar.get_width()/2, height),
+                        xytext=(0, 3), textcoords="offset points",
+                        ha='center', va='bottom')
+    
+    st.pyplot(fig)
 
 # =============================================================================
 #                            PAGE NAVIGATION
