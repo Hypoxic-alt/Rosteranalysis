@@ -6,13 +6,13 @@ import numpy as np
 # =============================================================================
 #            HELPER FUNCTION TO PROCESS THE UPLOADED FILE
 # =============================================================================
-def process_file(uploaded_file):
+def process_file(source):
     """
-    Process the uploaded Excel file (exported from the Coreschedule grid view)
-    and return a melted DataFrame with columns: 'Name', 'Date', and 'Shift'.
+    Process the Excel file from the given source (which can be a file-like object
+    or a URL) and return a melted DataFrame with columns: 'Name', 'Date', 'Shift'.
     """
-    # Read the Excel file and select the first sheet
-    df = pd.ExcelFile(uploaded_file)
+    # Read the Excel file from the source and select the first sheet
+    df = pd.ExcelFile(source)
     sheet_name = df.sheet_names[0]
     df = pd.read_excel(df, sheet_name=sheet_name, header=None)
 
@@ -21,9 +21,9 @@ def process_file(uploaded_file):
     df_cleaned = df.iloc[3:].reset_index(drop=True)
     # Row 1 (index 1) contains headers (names and dates)
     df_cleaned.columns = df.iloc[1]
-    # Rename first column to "Name"
+    # Rename the first column to "Name"
     df_cleaned.rename(columns={df_cleaned.columns[0]: "Name"}, inplace=True)
-    # Drop any columns that are completely empty
+    # Drop any completely empty columns
     df_cleaned = df_cleaned.dropna(axis=1, how='all')
 
     # ----------------- DATE EXTRACTION & CORRECTION --------------------------
@@ -32,16 +32,13 @@ def process_file(uploaded_file):
     corrected_dates = []
     current_year = 2024
     for date in date_strings:
-        # Parse the date (ignoring the appended year)
         parsed_date = pd.to_datetime(date[:-5], format='%a %d-%b', errors='coerce')
-        # If transitioning from December to January, update to 2025
         if corrected_dates and parsed_date.month == 1 and corrected_dates[-1].month == 12:
             current_year = 2025
         corrected_date_str = f"{parsed_date.strftime('%a %d-%b')}-{current_year}"
         corrected_date = pd.to_datetime(corrected_date_str, format='%a %d-%b-%Y', errors='coerce')
         corrected_dates.append(corrected_date)
     date_series = pd.Series(corrected_dates)
-    # Set DataFrame column headers: first column remains "Name", others become corrected dates
     df_cleaned.columns = ["Name"] + list(date_series)
 
     # ----------------- RESHAPE DATA TO LONG FORMAT ---------------------------
@@ -56,21 +53,59 @@ def process_file(uploaded_file):
     return df_melted
 
 # =============================================================================
+#         HELPER FUNCTION TO CONVERT GOOGLE DRIVE SHAREABLE URL
+# =============================================================================
+def convert_to_direct_url(shareable_url):
+    """
+    Convert a Google Drive shareable URL to a direct download URL.
+    For example:
+      Shareable URL: https://drive.google.com/file/d/FILE_ID/view?usp=sharing
+      Direct download URL: https://drive.google.com/uc?export=download&id=FILE_ID
+    """
+    try:
+        file_id = shareable_url.split('/d/')[1].split('/')[0]
+    except IndexError:
+        st.error("The provided URL does not appear to be valid. Please check the format.")
+        return None
+    return f"https://drive.google.com/uc?export=download&id={file_id}"
+
+# =============================================================================
 #                          PAGE 1: UPLOAD FILE
 # =============================================================================
 def upload_page():
     st.title("Upload File")
-    st.write("**Instructions:** Please upload an Excel file exported from the Coreschedule grid view.")
-    
-    # File uploader (only .xlsx files are allowed)
+    st.write("**Instructions:** Upload an Excel file exported from the Coreschedule grid view, or load one automatically from Google Drive.")
+
+    # --- Option 1: Manual file upload ---
     uploaded_file = st.file_uploader("Upload an Excel file", type=["xlsx"])
-    
     if uploaded_file is not None:
-        # Process the uploaded file and save the DataFrame in session_state for later pages
         df_melted = process_file(uploaded_file)
         st.session_state["df_melted"] = df_melted
         st.success("File uploaded and processed successfully!")
-        st.write("You can now navigate to the 'Main Data' or 'Administrative Time' pages from the sidebar.")
+
+    st.markdown("---")
+    st.write("**Or load the file automatically from Google Drive:**")
+
+    # --- Option 2: Load from Google Drive via copy-paste link ---
+    # Text input for the user to paste the Google Drive shareable URL.
+    gdrive_link = st.text_input("Enter the Google Drive shareable URL:")
+    if st.button("Load File from Google Drive"):
+        if gdrive_link:
+            download_url = convert_to_direct_url(gdrive_link)
+            if download_url:
+                try:
+                    df_melted = process_file(download_url)
+                    st.session_state["df_melted"] = df_melted
+                    st.success("File loaded successfully from Google Drive!")
+                except Exception as e:
+                    st.error(f"Error processing file: {e}")
+        else:
+            st.error("Please enter a valid Google Drive URL.")
+
+    # Optionally display a preview if data has been loaded
+    if "df_melted" in st.session_state:
+        st.write("Preview of loaded data:")
+        st.dataframe(st.session_state["df_melted"].head())
 
 # =============================================================================
 #                          PAGE 2: MAIN DATA & PLOTS
