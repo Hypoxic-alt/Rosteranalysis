@@ -219,32 +219,31 @@ def admin_time_page():
     max_date = df_melted["Date"].max()
     start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date])
     
-    # Sidebar: Enter admin hour values for each shift (default values are current)
-    st.sidebar.header("Administration Hour Values (out of 10)")
-    admin_cst = st.sidebar.number_input("CST:", value=10, min_value=0, max_value=10, step=1)
-    admin_hb_ic_pm = st.sidebar.number_input("HB IC PM:", value=3, min_value=0, max_value=10, step=1)
-    admin_hb_21c_pm = st.sidebar.number_input("HB 21C PM:", value=3, min_value=0, max_value=10, step=1)
-    admin_mic = st.sidebar.number_input("MIC:", value=5, min_value=0, max_value=10, step=1)
-    admin_hb_am = st.sidebar.number_input("HB AM EDSTTA / HB IC AM (weekdays only):", value=5, min_value=0, max_value=10, step=1)
-    
-    # Create a dictionary for admin hours per shift
-    admin_dict = {
-        "CST": admin_cst,
-        "HB IC PM": admin_hb_ic_pm,
-        "HB 21C PM": admin_hb_21c_pm,
-        "MIC": admin_mic,
-        "HB AM EDSTTA": admin_hb_am,
-        "HB IC AM": admin_hb_am
-    }
-    
-    # Filter data based on the selected date range
+    # Filter data based on date range
     df_filtered = df_melted[(df_melted["Date"] >= pd.Timestamp(start_date)) &
                             (df_melted["Date"] <= pd.Timestamp(end_date))].copy()
     
+    # Sidebar: Administration Hour Values for each unique shift
+    st.sidebar.header("Administration Hour Values (out of 10)")
+    unique_shifts = sorted(df_filtered["Shift"].unique())
+    # Provide default values for known shifts; others default to 0.
+    default_values = {
+        "CST": 10,
+        "HB IC PM": 3,
+        "HB 21C PM": 3,
+        "MIC": 5,
+        "HB AM EDSTTA": 5,
+        "HB IC AM": 5
+    }
+    admin_dict = {}
+    for shift in unique_shifts:
+        default_val = default_values.get(shift, 0)
+        admin_dict[shift] = st.sidebar.number_input(f"{shift}:", value=default_val, min_value=0, max_value=10, step=1, key=f"admin_{shift}")
+
     # Calculate administrative hours per record based on custom inputs
     def get_admin_hours(row):
         shift = row["Shift"]
-        # For HB AM EDSTTA and HB IC AM, count only on weekdays
+        # For HB AM EDSTTA and HB IC AM, count only on weekdays.
         if shift in ["HB AM EDSTTA", "HB IC AM"]:
             return admin_dict[shift] if row["Date"].weekday() < 5 else 0
         elif shift in admin_dict:
@@ -254,7 +253,7 @@ def admin_time_page():
 
     df_filtered["AdminHours"] = df_filtered.apply(get_admin_hours, axis=1)
     
-    # Calculate overall administrative percentage for all staff
+    # Overall administrative percentage for all staff
     total_admin_hours_all = df_filtered["AdminHours"].sum()
     total_shifts_all = len(df_filtered)
     overall_admin_percentage = (total_admin_hours_all / (total_shifts_all * 10)) * 100 if total_shifts_all > 0 else 0
@@ -299,28 +298,27 @@ def admin_comparison_page():
     max_date = df_melted["Date"].max()
     start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date], key="admin_compare_date")
     
-    # Sidebar: Enter admin hour values for each shift (default values)
+    # Sidebar: Administration Hour Values for each unique shift (for comparison)
     st.sidebar.header("Administration Hour Values (out of 10)")
-    admin_cst = st.sidebar.number_input("CST:", value=10, min_value=0, max_value=10, step=1, key="cmp_cst")
-    admin_hb_ic_pm = st.sidebar.number_input("HB IC PM:", value=3, min_value=0, max_value=10, step=1, key="cmp_ic_pm")
-    admin_hb_21c_pm = st.sidebar.number_input("HB 21C PM:", value=3, min_value=0, max_value=10, step=1, key="cmp_21c_pm")
-    admin_mic = st.sidebar.number_input("MIC:", value=5, min_value=0, max_value=10, step=1, key="cmp_mic")
-    admin_hb_am = st.sidebar.number_input("HB AM EDSTTA / HB IC AM (weekdays only):", value=5, min_value=0, max_value=10, step=1, key="cmp_hb_am")
-    
-    admin_dict = {
-        "CST": admin_cst,
-        "HB IC PM": admin_hb_ic_pm,
-        "HB 21C PM": admin_hb_21c_pm,
-        "MIC": admin_mic,
-        "HB AM EDSTTA": admin_hb_am,
-        "HB IC AM": admin_hb_am
+    unique_shifts = sorted(df_melted["Shift"].unique())
+    default_values = {
+        "CST": 10,
+        "HB IC PM": 3,
+        "HB 21C PM": 3,
+        "MIC": 5,
+        "HB AM EDSTTA": 5,
+        "HB IC AM": 5
     }
+    admin_dict = {}
+    for shift in unique_shifts:
+        default_val = default_values.get(shift, 0)
+        admin_dict[shift] = st.sidebar.number_input(f"{shift}:", value=default_val, min_value=0, max_value=10, step=1, key=f"cmp_admin_{shift}")
     
-    # Filter the data based on date range
+    # Filter data based on date range
     df_filtered = df_melted[(df_melted["Date"] >= pd.Timestamp(start_date)) &
                             (df_melted["Date"] <= pd.Timestamp(end_date))].copy()
     
-    # Calculate admin hours for each record
+    # Calculate admin hours for each record using custom inputs
     def get_admin_hours(row):
         shift = row["Shift"]
         if shift in ["HB AM EDSTTA", "HB IC AM"]:
@@ -347,11 +345,8 @@ def admin_comparison_page():
     for name in all_names:
         if st.sidebar.checkbox(name, value=True, key=f"cmp_{name}"):
             selected_users.append(name)
-    
-    # Filter the DataFrame based on selected users
     admin_df = admin_df[admin_df["Name"].isin(selected_users)]
     
-    # Plot the comparison graph
     st.subheader("Administrative Time Percentage by User")
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.bar(admin_df["Name"], admin_df["AdminPercentage"], color="purple")
