@@ -219,6 +219,32 @@ def main_data_page():
     ax.legend()
     st.pyplot(fig)
 
+# --- New: CST Percentage Table ---
+    st.subheader(f"CST-Related Hours for {person}")
+    # Total hours = count of selected shifts * 10h
+    total_shifts = len(df_p)
+    total_hours = total_shifts * 10
+
+    # Define CST-related mapping
+    cst_map = {
+        "CST": 10,
+        "HB CDU AM": 5,
+        "HB AM EDSTTA": 5,
+        "HB 2IC PM": 3,
+        "HB IC PM": 3,
+        "HB CDU PM": 3
+    }
+    # Sum up hours for only those CST-related shifts
+    cst_hours = df_p["Shift"].map(cst_map).fillna(0).sum()
+
+    # Build result table
+    result = pd.DataFrame({
+        "Total Hours": [total_hours],
+        "Total CST-Related Hours": [cst_hours],
+        "CST % of Total": [(cst_hours/total_hours*100) if total_hours>0 else 0]
+    }).round(2)
+
+    st.table(result)
 # =============================================================================
 #                    PAGE 3: ADMINISTRATIVE TIME ANALYSIS
 # =============================================================================
