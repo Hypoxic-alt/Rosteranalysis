@@ -130,82 +130,90 @@ def main_data_page():
     show_pct = st.sidebar.checkbox("Show Percentages", True)
     show_med = st.sidebar.checkbox("Show Median Comparison", True)
 
-    # Date‐filtered data for charts & table
     df_filtered = df[(df["Date"] >= sd) & (df["Date"] <= ed)]
 
-    # --- Name & shift selection for the charts only ---
+    # --- Name & shift selection ---
     st.sidebar.header("Filter Options")
     selected_name = st.sidebar.selectbox("Select a Name:", df_filtered["Name"].unique())
     df_person = df_filtered[df_filtered["Name"] == selected_name]
 
-    st.sidebar.header("Select Shifts (Charts Only)")
+    st.sidebar.header("Select Shifts")
     shift_opts = sorted(df_person["Shift"].unique())
     active_shifts = [s for s in shift_opts if st.sidebar.checkbox(s, True)]
     df_person = df_person[df_person["Shift"].isin(active_shifts)]
 
-    # --- Chart 1: Shift Distribution ---
+    # --- Plot 1: Shift Distribution ---
     st.subheader(f"Shift Distribution for {selected_name}")
     shift_counts = df_person["Shift"].value_counts()
     if show_pct:
         shift_counts = (shift_counts / shift_counts.sum()) * 100
 
     all_sel = df_filtered[df_filtered["Shift"].isin(active_shifts)]
-    med_counts = (
+    median_shift_counts = (
         all_sel.groupby("Name")["Shift"]
                .value_counts()
                .unstack(fill_value=0)
                .median(axis=0)
     )
     if show_pct:
-        med_counts = (med_counts / med_counts.sum()) * 100
+        median_shift_counts = (median_shift_counts / median_shift_counts.sum()) * 100
 
-    keys = sorted(set(shift_counts.index) | set(med_counts.index))
+    keys = sorted(set(shift_counts.index) | set(median_shift_counts.index))
     shift_counts = shift_counts.reindex(keys, fill_value=0)
-    med_counts = med_counts.reindex(keys, fill_value=0)
+    median_shift_counts = median_shift_counts.reindex(keys, fill_value=0)
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    x = np.arange(len(keys)); w = 0.4
+    x = np.arange(len(keys))
+    w = 0.4
     ax.bar(x, shift_counts, w, label=selected_name, color="skyblue")
     if show_med:
-        ax.bar(x + w, med_counts, w, label="Median", color="orange")
+        ax.bar(x + w, median_shift_counts, w, label="Median", color="orange")
     ax.set_xticks(x + w/2)
     ax.set_xticklabels(keys, rotation=45, ha="right")
     ax.set_ylabel("Percentage" if show_pct else "Count")
     ax.legend()
     st.pyplot(fig)
 
-    # --- Chart 2: Weekday vs Weekend ---
+    # --- Plot 2: Weekday vs Weekend ---
     st.subheader(f"Weekday vs. Weekend for {selected_name}")
     df_person["Day"] = df_person["Date"].dt.day_name()
     total = len(df_person)
-    wknd = df_person["Day"].isin(["Saturday", "Sunday"]).sum()
-    wd = total - wknd
+    weekend = df_person["Day"].isin(["Saturday", "Sunday"]).sum()
+    weekday = total - weekend
+
     if show_pct and total > 0:
-        wknd, wd = wknd/total*100, wd/total*100
+        weekend = weekend / total * 100
+        weekday = weekday / total * 100
 
     if show_med:
-        aw = df_filtered.groupby("Name").apply(
+        all_weekend = df_filtered.groupby("Name").apply(
             lambda x: x["Date"].dt.day_name().isin(["Saturday", "Sunday"]).sum()
         )
-        am = df_filtered.groupby("Name").apply(
+        all_weekday = df_filtered.groupby("Name").apply(
             lambda x: (~x["Date"].dt.day_name().isin(["Saturday", "Sunday"])).sum()
         )
-        mw, md = aw.median(), am.median()
-        if show_pct and (mw + md) > 0:
-            mw, md = mw/(mw+md)*100, md/(mw+md)*100
+        med_weekend = all_weekend.median()
+        med_weekday = all_weekday.median()
+        if show_pct and (med_weekday + med_weekend) > 0:
+            med_weekend = med_weekend / (med_weekend + med_weekday) * 100
+            med_weekday = med_weekday / (med_weekend + med_weekday) * 100
 
     fig, ax = plt.subplots(figsize=(6, 4))
-    ax.bar(["Weekdays","Weekends"], [wd, wknd], color=["blue","red"], label=selected_name)
+    ax.bar(["Weekdays", "Weekends"], [weekday, weekend], color=["blue", "red"], label=selected_name)
     if show_med:
-        ax.bar(["Weekdays","Weekends"], [md, mw], alpha=0.5, color="orange", label="Median")
+        ax.bar(["Weekdays", "Weekends"], [med_weekday, med_weekend],
+               alpha=0.5, color="orange", label="Median")
     ax.set_ylabel("Percentage" if show_pct else "Count")
     ax.legend()
     st.pyplot(fig)
 
-    # --- New: CST Summary Table (ALL shifts in df_filtered) ---
-    st.subheader("CST-Related Hours Summary (All Shifts)")
+    # --- New: CST-Related Hours Table for ALL STAFF ---
+    st.subheader("CST-Related Hours Summary (Selected Shifts)")
 
-    # Map of CST‐related hours
+    # Filter down to active shifts
+    df_active = df_filtered[df_filtered["Shift"].isin(active_shifts)]
+
+    # Define CST-related mapping
     cst_map = {
         "CST": 10,
         "HB CDU AM": 5,
@@ -215,21 +223,21 @@ def main_data_page():
         "HB CDU PM": 3
     }
 
-    # Build summary over df_filtered (ignores checkbox filtering)
-    summary = df_filtered.groupby("Name").agg(
-        TotalShifts=("Shift","count")
+    # Compute for each staff member
+    summary = df_active.groupby("Name").agg(
+        TotalShifts=("Shift", "count")
     )
     summary["Total Hours"] = summary["TotalShifts"] * 10
-    summary["Total CST Hours"] = (
-        df_filtered.groupby("Name")["Shift"]
-                   .apply(lambda s: s.map(cst_map).fillna(0).sum())
-    )
-    summary["Percentage CST"] = (
-        summary["Total CST Hours"] / summary["Total Hours"] * 100
-    ).round(2).fillna(0)
+    # Sum CST-related hours per Name
+    summary["Total CST Hours"] = df_active.groupby("Name")["Shift"] \
+        .apply(lambda s: s.map(cst_map).fillna(0).sum())
+    summary["Percentage CST"] = (summary["Total CST Hours"] 
+                                 / summary["Total Hours"] * 100).round(2).fillna(0)
 
-    # Display table
-    st.table(summary[["Total Hours","Total CST Hours","Percentage CST"]])
+    # Reorder and display
+    summary = summary[["Total Hours", "Total CST Hours", "Percentage CST"]]
+    st.table(summary)
+
 
 # =============================================================================
 #                    PAGE 3: ADMINISTRATIVE TIME ANALYSIS
