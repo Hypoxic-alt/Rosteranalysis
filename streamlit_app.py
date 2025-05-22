@@ -207,12 +207,13 @@ def main_data_page():
     ax.legend()
     st.pyplot(fig)
 
-    # --- NEW: CST-Related Hours Table ---
-    st.subheader(f"CST-Related Hours for {selected_name}")
-    # Total hours = number of selected shifts * 10 h
-    total_hours = len(df_person) * 10
+    # --- New: CST-Related Hours Table for ALL STAFF ---
+    st.subheader("CST-Related Hours Summary (Selected Shifts)")
 
-    # Hour mapping for CST-related codes
+    # Filter down to active shifts
+    df_active = df_filtered[df_filtered["Shift"].isin(active_shifts)]
+
+    # Define CST-related mapping
     cst_map = {
         "CST": 10,
         "HB CDU AM": 5,
@@ -221,17 +222,21 @@ def main_data_page():
         "HB IC PM": 3,
         "HB CDU PM": 3
     }
-    # Sum cst hours only for the filtered person
-    cst_hours = df_person["Shift"].map(cst_map).fillna(0).sum()
 
-    result = pd.DataFrame({
-        "Total Hours": [total_hours],
-        "Total CST-Related Hours": [cst_hours],
-        "CST % of Total": [round((cst_hours / total_hours * 100) if total_hours else 0, 2)]
-    })
+    # Compute for each staff member
+    summary = df_active.groupby("Name").agg(
+        TotalShifts=("Shift", "count")
+    )
+    summary["Total Hours"] = summary["TotalShifts"] * 10
+    # Sum CST-related hours per Name
+    summary["Total CST Hours"] = df_active.groupby("Name")["Shift"] \
+        .apply(lambda s: s.map(cst_map).fillna(0).sum())
+    summary["Percentage CST"] = (summary["Total CST Hours"] 
+                                 / summary["Total Hours"] * 100).round(2).fillna(0)
 
-    st.table(result)
-
+    # Reorder and display
+    summary = summary[["Total Hours", "Total CST Hours", "Percentage CST"]]
+    st.table(summary)
 # =============================================================================
 #                    PAGE 3: ADMINISTRATIVE TIME ANALYSIS
 # =============================================================================
