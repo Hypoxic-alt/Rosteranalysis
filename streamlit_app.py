@@ -122,103 +122,99 @@ def main_data_page():
         return
     df = st.session_state["df_melted"]
 
-    # --- Sidebar filters ---
+    # --- Sidebar: Date filter ---
     st.sidebar.header("Main Data Filters")
     mn, mx = df["Date"].min(), df["Date"].max()
     sd, ed = st.sidebar.date_input("Select Date Range", [mn, mx])
     sd, ed = pd.Timestamp(sd), pd.Timestamp(ed)
     show_pct = st.sidebar.checkbox("Show Percentages", True)
     show_med = st.sidebar.checkbox("Show Median Comparison", True)
-
     df_filtered = df[(df["Date"] >= sd) & (df["Date"] <= ed)]
 
-    # --- Name & shift selection ---
+    # --- Sidebar: Person & shift selection for charts only ---
     st.sidebar.header("Filter Options")
     selected_name = st.sidebar.selectbox("Select a Name:", df_filtered["Name"].unique())
     df_person = df_filtered[df_filtered["Name"] == selected_name]
 
     st.sidebar.header("Select Shifts (Charts Only)")
-    # Use df_filtered to get every shift in the date range
     shift_opts = sorted(df_filtered["Shift"].unique())
-    # Build checkboxes for all those shifts
-    selected_shifts = {shift: st.sidebar.checkbox(shift, True) for shift in shift_opts}
-    active_shifts = [shift for shift, show in selected_shifts.items() if show]
-    # Then filter your person’s data for the charts
+    selected_shifts = {
+        shift: st.sidebar.checkbox(shift, True)
+        for shift in shift_opts
+    }
+    active_shifts = [s for s, on in selected_shifts.items() if on]
     df_person = df_person[df_person["Shift"].isin(active_shifts)]
 
-
-    # --- Plot 1: Shift Distribution ---
+    # --- Chart 1: Shift Distribution ---
     st.subheader(f"Shift Distribution for {selected_name}")
     shift_counts = df_person["Shift"].value_counts()
     if show_pct:
-        shift_counts = (shift_counts / shift_counts.sum()) * 100
+        shift_counts = shift_counts / shift_counts.sum() * 100
 
     all_sel = df_filtered[df_filtered["Shift"].isin(active_shifts)]
-    median_shift_counts = (
+    med_counts = (
         all_sel.groupby("Name")["Shift"]
                .value_counts()
                .unstack(fill_value=0)
                .median(axis=0)
     )
     if show_pct:
-        median_shift_counts = (median_shift_counts / median_shift_counts.sum()) * 100
+        med_counts = med_counts / med_counts.sum() * 100
 
-    keys = sorted(set(shift_counts.index) | set(median_shift_counts.index))
+    keys = sorted(set(shift_counts.index) | set(med_counts.index))
     shift_counts = shift_counts.reindex(keys, fill_value=0)
-    median_shift_counts = median_shift_counts.reindex(keys, fill_value=0)
+    med_counts   = med_counts.reindex(keys, fill_value=0)
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    x = np.arange(len(keys))
-    w = 0.4
+    x = np.arange(len(keys)); w = 0.4
     ax.bar(x, shift_counts, w, label=selected_name, color="skyblue")
     if show_med:
-        ax.bar(x + w, median_shift_counts, w, label="Median", color="orange")
+        ax.bar(x + w, med_counts,   w, label="Median", color="orange")
     ax.set_xticks(x + w/2)
     ax.set_xticklabels(keys, rotation=45, ha="right")
     ax.set_ylabel("Percentage" if show_pct else "Count")
     ax.legend()
     st.pyplot(fig)
 
-    # --- Plot 2: Weekday vs Weekend ---
+    # --- Chart 2: Weekday vs Weekend ---
     st.subheader(f"Weekday vs. Weekend for {selected_name}")
     df_person["Day"] = df_person["Date"].dt.day_name()
     total = len(df_person)
     weekend = df_person["Day"].isin(["Saturday", "Sunday"]).sum()
     weekday = total - weekend
-
     if show_pct and total > 0:
-        weekend = weekend / total * 100
-        weekday = weekday / total * 100
+        weekend, weekday = weekend/total*100, weekday/total*100
 
     if show_med:
-        all_weekend = df_filtered.groupby("Name").apply(
-            lambda x: x["Date"].dt.day_name().isin(["Saturday", "Sunday"]).sum()
+        aw = df_filtered.groupby("Name").apply(
+            lambda x: x["Date"].dt.day_name().isin(["Saturday","Sunday"]).sum()
         )
-        all_weekday = df_filtered.groupby("Name").apply(
-            lambda x: (~x["Date"].dt.day_name().isin(["Saturday", "Sunday"])).sum()
+        am = df_filtered.groupby("Name").apply(
+            lambda x: (~x["Date"].dt.day_name().isin(["Saturday","Sunday"])).sum()
         )
-        med_weekend = all_weekend.median()
-        med_weekday = all_weekday.median()
-        if show_pct and (med_weekday + med_weekend) > 0:
-            med_weekend = med_weekend / (med_weekend + med_weekday) * 100
-            med_weekday = med_weekday / (med_weekend + med_weekday) * 100
+        mw, md = aw.median(), am.median()
+        if show_pct and (mw+md) > 0:
+            mw, md = mw/(mw+md)*100, md/(mw+md)*100
 
     fig, ax = plt.subplots(figsize=(6, 4))
-    ax.bar(["Weekdays", "Weekends"], [weekday, weekend], color=["blue", "red"], label=selected_name)
+    ax.bar(["Weekdays","Weekends"], [weekday, weekend], color=["blue","red"], label=selected_name)
     if show_med:
-        ax.bar(["Weekdays", "Weekends"], [med_weekday, med_weekend],
-               alpha=0.5, color="orange", label="Median")
+        ax.bar(["Weekdays","Weekends"], [md, mw], alpha=0.5, color="orange", label="Median")
     ax.set_ylabel("Percentage" if show_pct else "Count")
     ax.legend()
     st.pyplot(fig)
 
- # Define the row‐wise CST‐hours function **before** you call `apply`
+    # ------------------------------------------------------------------------
+    # --- CST Summary Table (all shifts in date range, with weekday-only AM) ---
+    # ------------------------------------------------------------------------
+
+    # 1) Define the per-row CST-hours function up front
     def get_cst_hours(row):
         s = row["Shift"]
-        # always count
+        # always count CST
         if s == "CST":
             return 10
-        # count only on weekdays
+        # count these AM shifts only on weekdays
         if s in ["HB CDU AM", "HB AM EDSTTA"]:
             return 5 if row["Date"].weekday() < 5 else 0
         # always count these PM shifts
@@ -226,23 +222,22 @@ def main_data_page():
             return 3
         return 0
 
-    # Now apply it:
+    # 2) Build df_table from all date-filtered data (ignore chart shift filters)
+    df_table = df_filtered.copy()
     df_table["CSTHours"] = df_table.apply(get_cst_hours, axis=1)
 
-    # Build your summary
+    # 3) Aggregate per person
     summary = df_table.groupby("Name").agg(
-        TotalShifts   = ("Shift",      "count"),
-        TotalHours    = ("Shift",      lambda x: len(x) * 10),
-        TotalCSTHours = ("CSTHours",   "sum")
+        TotalShifts   = ("Shift",    "count"),
+        TotalHours    = ("Shift",    lambda x: len(x)*10),
+        TotalCSTHours = ("CSTHours", "sum")
     )
-    summary["Percentage CST"] = (
-        summary["TotalCSTHours"] 
-        / summary["TotalHours"] * 100
-    ).round(2).fillna(0)
+    summary["Percentage CST"] = (summary["TotalCSTHours"] / summary["TotalHours"] * 100) \
+                                 .round(2).fillna(0)
 
-    st.subheader("CST-Related Hours Summary")
+    # 4) Display table
+    st.subheader("CST-Related Hours Summary (All Shifts)")
     st.table(summary[["TotalHours","TotalCSTHours","Percentage CST"]])
-    # --------------------------------------------------------------------------
 
 
 # =============================================================================
