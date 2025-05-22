@@ -8,102 +8,74 @@ import numpy as np
 # =============================================================================
 def process_file(source):
     """
-    Process the Excel file from the given source (which can be a file-like object
-    or a URL) and return a melted DataFrame with columns: 'Name', 'Date', 'Shift'.
+    Process the Excel file from the given source (file-like or URL)
+    and return a melted DataFrame with columns: 'Name', 'Date', 'Shift'.
     """
-    # Read the Excel file from the source and select the first sheet
     df = pd.ExcelFile(source)
     sheet_name = df.sheet_names[0]
     df = pd.read_excel(df, sheet_name=sheet_name, header=None)
 
-    # ----------------- DATA CLEANING & PREPARATION ---------------------------
-    # Assume data starts at row 3 (0-indexed row 3)
+    # Data starts at row 3 (index 3)
     df_cleaned = df.iloc[3:].reset_index(drop=True)
-    # Row 1 (index 1) contains headers (names and dates)
+    # Row 1 (index 1) has the headers
     df_cleaned.columns = df.iloc[1]
-    # Rename the first column to "Name"
     df_cleaned.rename(columns={df_cleaned.columns[0]: "Name"}, inplace=True)
-    # Drop any completely empty columns
     df_cleaned = df_cleaned.dropna(axis=1, how='all')
 
-    # ----------------- DATE EXTRACTION & CORRECTION --------------------------
-    # Extract date strings from row 3 (index 2) and append a default year (2024)
+    # Extract and correct dates (row 2, index 2)
     date_strings = df.iloc[2, 1:].dropna().astype(str) + "-2024"
     corrected_dates = []
     current_year = 2024
     for date in date_strings:
-        parsed_date = pd.to_datetime(date[:-5], format='%a %d-%b', errors='coerce')
-        if corrected_dates and parsed_date.month == 1 and corrected_dates[-1].month == 12:
+        parsed = pd.to_datetime(date[:-5], format='%a %d-%b', errors='coerce')
+        if corrected_dates and parsed.month == 1 and corrected_dates[-1].month == 12:
             current_year = 2025
-        corrected_date_str = f"{parsed_date.strftime('%a %d-%b')}-{current_year}"
-        corrected_date = pd.to_datetime(corrected_date_str, format='%a %d-%b-%Y', errors='coerce')
-        corrected_dates.append(corrected_date)
-    date_series = pd.Series(corrected_dates)
-    df_cleaned.columns = ["Name"] + list(date_series)
+        full = f"{parsed.strftime('%a %d-%b')}-{current_year}"
+        corrected_dates.append(pd.to_datetime(full, format='%a %d-%b-%Y', errors='coerce'))
+    df_cleaned.columns = ["Name"] + corrected_dates
 
-    # ----------------- RESHAPE DATA TO LONG FORMAT ---------------------------
+    # Melt to long format
     df_melted = df_cleaned.melt(id_vars=["Name"], var_name="Date", value_name="Shift")
     df_melted["Date"] = pd.to_datetime(df_melted["Date"], errors='coerce')
     df_melted = df_melted.dropna(subset=["Shift"])
 
-    # ----------------- FILTER OUT UNWANTED SHIFT TYPES -----------------------
-    excluded_shifts = ["OFF", "Off", "RL SMO", "FL SMO", "SL", "PDL SMO"]
-    df_melted = df_melted[~df_melted["Shift"].isin(excluded_shifts)]
-    
+    # Exclude unwanted shifts
+    excluded = ["OFF", "Off", "RL SMO", "FL SMO", "SL", "PDL SMO"]
+    df_melted = df_melted[~df_melted["Shift"].isin(excluded)]
     return df_melted
 
 # =============================================================================
 #         HELPER FUNCTION TO CONVERT GOOGLE DRIVE SHAREABLE URL
 # =============================================================================
 def convert_to_direct_url(shareable_url):
-    """
-    Convert a Google Drive shareable URL to a direct download URL.
-    For example:
-      Shareable URL: https://drive.google.com/file/d/FILE_ID/view?usp=sharing
-      Direct download URL: https://drive.google.com/uc?export=download&id=FILE_ID
-    """
     try:
         file_id = shareable_url.split('/d/')[1].split('/')[0]
-    except IndexError:
-        st.error("The provided URL does not appear to be valid. Please check the format.")
+        return f"https://drive.google.com/uc?export=download&id={file_id}"
+    except Exception:
+        st.error("Invalid Google Drive URL.")
         return None
-    return f"https://drive.google.com/uc?export=download&id={file_id}"
 
 # =============================================================================
 #                          PAGE 1: UPLOAD FILE
 # =============================================================================
 def upload_page():
     st.title("Upload File")
-    st.write("**Instructions:** Upload an Excel file exported from the Coreschedule grid view, or load one automatically from Google Drive.")
+    st.write("Upload an Excel file or load from Google Drive:")
 
-    # --- Option 1: Manual file upload ---
-    uploaded_file = st.file_uploader("Upload an Excel file", type=["xlsx"])
-    if uploaded_file is not None:
-        df_melted = process_file(uploaded_file)
-        st.session_state["df_melted"] = df_melted
-        st.success("File uploaded and processed successfully!")
+    uploaded = st.file_uploader("Excel file", type=["xlsx"])
+    if uploaded:
+        st.session_state["df_melted"] = process_file(uploaded)
+        st.success("File processed!")
 
     st.markdown("---")
-    st.write("**Or load the file automatically from Google Drive:**")
+    link = st.text_input("Google Drive share URL")
+    if st.button("Load from Google Drive") and link:
+        url = convert_to_direct_url(link)
+        if url:
+            st.session_state["df_melted"] = process_file(url)
+            st.success("Loaded from Drive!")
 
-    # --- Option 2: Load from Google Drive via copy-paste link ---
-    gdrive_link = st.text_input("Enter the Google Drive shareable URL:")
-    if st.button("Load File from Google Drive"):
-        if gdrive_link:
-            download_url = convert_to_direct_url(gdrive_link)
-            if download_url:
-                try:
-                    df_melted = process_file(download_url)
-                    st.session_state["df_melted"] = df_melted
-                    st.success("File loaded successfully from Google Drive!")
-                except Exception as e:
-                    st.error(f"Error processing file: {e}")
-        else:
-            st.error("Please enter a valid Google Drive URL.")
-
-    # Optionally display a preview if data has been loaded
     if "df_melted" in st.session_state:
-        st.write("Preview of loaded data:")
         st.dataframe(st.session_state["df_melted"].head())
 
 # =============================================================================
@@ -111,105 +83,72 @@ def upload_page():
 # =============================================================================
 def main_data_page():
     st.title("Main Data")
-    
-    if "df_melted" not in st.session_state or st.session_state["df_melted"] is None:
-        st.error("No file uploaded yet. Please navigate to the 'Upload File' page and upload a file.")
+    if "df_melted" not in st.session_state:
+        st.error("Please upload a file first.")
         return
-    
-    df_melted = st.session_state["df_melted"]
+    df = st.session_state["df_melted"]
 
-    # ------------------- SIDEBAR FILTERS -----------------------
     st.sidebar.header("Main Data Filters")
-    min_date = df_melted["Date"].min()
-    max_date = df_melted["Date"].max()
-    start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date])
-    show_percentage = st.sidebar.checkbox("Show Percentages", value=True)
-    show_median = st.sidebar.checkbox("Show Median Comparison", value=True)
-    
-    # Apply date filter
-    df_filtered = df_melted[
-        (df_melted["Date"] >= pd.Timestamp(start_date)) &
-        (df_melted["Date"] <= pd.Timestamp(end_date))
-    ]
-    
-    # ------------------- FILTER BY NAME & SHIFT -----------------------
+    mn, mx = df["Date"].min(), df["Date"].max()
+    sd, ed = st.sidebar.date_input("Date Range", [mn, mx])
+    pct = st.sidebar.checkbox("Show Percentages", True)
+    med = st.sidebar.checkbox("Show Median Comparison", True)
+
+    df = df[(df["Date"] >= pd.Timestamp(sd)) & (df["Date"] <= pd.Timestamp(ed))]
+
     st.sidebar.header("Filter Options")
-    names = df_filtered["Name"].unique()
-    selected_name = st.sidebar.selectbox("Select a Name:", names)
-    df_person = df_filtered[df_filtered["Name"] == selected_name]
-    
-    st.sidebar.header("Select Shifts to Display")
-    shift_options = sorted(df_person["Shift"].unique())
-    selected_shifts = {shift: st.sidebar.checkbox(shift, value=True) for shift in shift_options}
-    active_shifts = [shift for shift, selected in selected_shifts.items() if selected]
-    df_person = df_person[df_person["Shift"].isin(active_shifts)]
-    
-    # ------------------- PLOT 1: SHIFT DISTRIBUTION -----------------------
-    st.subheader(f"Shift Distribution for {selected_name}")
-    shift_counts = df_person["Shift"].value_counts()
-    if show_percentage:
-        shift_counts = (shift_counts / shift_counts.sum()) * 100
-    all_shifts_data = df_filtered[df_filtered["Shift"].isin(active_shifts)]
-    median_shift_counts = all_shifts_data.groupby("Name")["Shift"].value_counts().unstack(fill_value=0).median(axis=0)
-    if show_percentage:
-        median_shift_counts = (median_shift_counts / median_shift_counts.sum()) * 100
-    
-    all_shifts = set(shift_counts.index).union(set(median_shift_counts.index))
-    shift_counts = shift_counts.reindex(all_shifts, fill_value=0)
-    median_shift_counts = median_shift_counts.reindex(all_shifts, fill_value=0)
-    
-    fig, ax = plt.subplots(figsize=(10, 5))
-    bar_width = 0.4
-    x = range(len(shift_counts))
-    ax.bar(x, shift_counts, width=bar_width, label=selected_name, color="skyblue", align='center')
-    if show_median:
-        ax.bar([i + bar_width for i in x], median_shift_counts, width=bar_width,
-               label="Median (All Staff)", color="orange", align='center')
-    
-    ax.set_xticks([i + bar_width / 2 for i in x])
-    ax.set_xticklabels(shift_counts.index, rotation=45, ha="right")
-    ax.set_ylabel("Percentage" if show_percentage else "Count")
-    ax.set_xlabel("Shift Type")
+    person = st.sidebar.selectbox("Select Name", df["Name"].unique())
+    df_p = df[df["Name"] == person]
+
+    st.sidebar.header("Select Shifts")
+    opts = sorted(df_p["Shift"].unique())
+    sel = [s for s in opts if st.sidebar.checkbox(s, True)]
+    df_p = df_p[df_p["Shift"].isin(sel)]
+
+    # Shift Distribution
+    st.subheader(f"Shift Distribution for {person}")
+    cnt = df_p["Shift"].value_counts()
+    if pct:
+        cnt = cnt / cnt.sum() * 100
+    all_sel = df[df["Shift"].isin(sel)]
+    med_cnt = all_sel.groupby("Name")["Shift"].value_counts().unstack(fill_value=0).median(axis=0)
+    if pct:
+        med_cnt = med_cnt / med_cnt.sum() * 100
+    keys = sorted(set(cnt.index).union(med_cnt.index))
+    cnt, med_cnt = cnt.reindex(keys, 0), med_cnt.reindex(keys, 0)
+
+    fig, ax = plt.subplots(figsize=(10,5))
+    x = np.arange(len(keys))
+    w = 0.4
+    ax.bar(x, cnt, w, label=person, color="skyblue")
+    if med:
+        ax.bar(x+w, med_cnt, w, label="Median", color="orange")
+    ax.set_xticks(x + w/2); ax.set_xticklabels(keys, rotation=45, ha="right")
+    ax.set_ylabel("Percentage" if pct else "Count")
     ax.legend()
     st.pyplot(fig)
-    
-    # ------------------- PLOT 2: WEEKDAY VS. WEEKEND -----------------------
-    st.subheader(f"Weekday vs. Weekend Shifts for {selected_name}")
-    df_person["Day"] = df_person["Date"].dt.day_name()
-    total_shifts = len(df_person)
-    weekend_shifts = len(df_person[df_person["Day"].isin(["Saturday", "Sunday"])])
-    weekday_shifts = total_shifts - weekend_shifts
-    
-    if show_percentage and total_shifts > 0:
-        weekend_shifts = (weekend_shifts / total_shifts) * 100
-        weekday_shifts = (weekday_shifts / total_shifts) * 100
-    
-    if show_median:
-        all_weekend_counts = df_filtered.groupby("Name").apply(lambda x: (x["Date"].dt.day_name().isin(["Saturday", "Sunday"])).sum())
-        all_weekday_counts = df_filtered.groupby("Name").apply(lambda x: (~x["Date"].dt.day_name().isin(["Saturday", "Sunday"])).sum())
-        median_weekend = all_weekend_counts.median()
-        median_weekday = all_weekday_counts.median()
-        if show_percentage:
-            median_total = median_weekend + median_weekday
-            if median_total > 0:
-                median_weekend = (median_weekend / median_total) * 100
-                median_weekday = (median_weekday / median_total) * 100
-    
-    fig, ax = plt.subplots(figsize=(6, 4))
-    labels = ["Weekdays", "Weekends"]
-    selected_values = [weekday_shifts, weekend_shifts]
-    median_values = [median_weekday, median_weekend] if show_median else None
-    
-    x = np.arange(len(labels))
-    bar_width = 0.4
-    ax.bar(x, selected_values, width=bar_width, label=selected_name, color="skyblue", align='center')
-    if show_median:
-        ax.bar(x + bar_width, median_values, width=bar_width, label="Median (All Staff)", color="orange", align='center')
-    
-    ax.set_xticks(x + (bar_width / 2 if show_median else 0))
-    ax.set_xticklabels(labels)
-    ax.set_ylabel("Percentage" if show_percentage else "Count")
-    ax.set_title(f"Weekday vs. Weekend Shifts for {selected_name}")
+
+    # Weekend vs Weekday
+    st.subheader(f"Weekday vs. Weekend for {person}")
+    df_p["Day"] = df_p["Date"].dt.day_name()
+    tot = len(df_p)
+    wknd = df_p["Day"].isin(["Saturday","Sunday"]).sum()
+    wd = tot - wknd
+    if pct and tot>0:
+        wknd, wd = wknd/tot*100, wd/tot*100
+    if med:
+        aw = df.groupby("Name").apply(lambda x: x["Date"].dt.day_name().isin(["Saturday","Sunday"]).sum())
+        am = df.groupby("Name").apply(lambda x: (~x["Date"].dt.day_name().isin(["Saturday","Sunday"])).sum())
+        mw = aw.median(); md = am.median()
+        if pct and (mw+md)>0:
+            mw, md = mw/(mw+md)*100, md/(mw+md)*100
+    fig, ax = plt.subplots(figsize=(6,4))
+    labels = ["Weekdays","Weekends"]
+    vals = [wd,wknd]
+    ax.bar(labels, vals, color=["blue","red"], label=person)
+    if med:
+        ax.bar(labels, [md,mw], alpha=0.5, color="orange", label="Median")
+    ax.set_ylabel("Percentage" if pct else "Count")
     ax.legend()
     st.pyplot(fig)
 
@@ -218,86 +157,50 @@ def main_data_page():
 # =============================================================================
 def admin_time_page():
     st.title("Administrative Time Analysis")
-    
-    if "df_melted" not in st.session_state or st.session_state["df_melted"] is None:
-        st.error("No file uploaded yet. Please navigate to the 'Upload File' page and upload a file.")
+    if "df_melted" not in st.session_state:
+        st.error("Upload first.")
         return
-    
-    df_melted = st.session_state["df_melted"]
-    
-    # ------------------- SIDEBAR FILTERS -----------------------
-    st.sidebar.header("Administrative Time Filters")
-    min_date = df_melted["Date"].min()
-    max_date = df_melted["Date"].max()
-    start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date])
-    
-    # Filter data based on the selected date range
-    df_filtered = df_melted[
-        (df_melted["Date"] >= pd.Timestamp(start_date)) &
-        (df_melted["Date"] <= pd.Timestamp(end_date))
-    ].copy()
-    
-    # ------------------- CALCULATE ADMINISTRATIVE HOURS -----------------------
-    def get_admin_hours(row):
-        shift = row["Shift"]
-        if shift == "CST":
-            return 10
-        elif shift in ["HB IC PM", "HB 21C PM"]:
-            return 3
-        elif shift == "MIC":
-            return 5
-        elif shift in ["HB AM EDSTTA", "HB IC AM"]:
-            return 5 if row["Date"].weekday() < 5 else 0
-        else:
-            return 0
+    df = st.session_state["df_melted"]
 
-    df_filtered["AdminHours"] = df_filtered.apply(get_admin_hours, axis=1)
-    
-    grouped = df_filtered.groupby("Name").agg(
-        TotalAdminHours=pd.NamedAgg(column="AdminHours", aggfunc="sum"),
-        TotalShifts=pd.NamedAgg(column="Shift", aggfunc="count")
+    st.sidebar.header("Admin Time Filters")
+    mn, mx = df["Date"].min(), df["Date"].max()
+    sd, ed = st.sidebar.date_input("Date Range", [mn, mx], key="adm_date")
+    pct = st.sidebar.checkbox("Show Percentages", True, key="adm_pct")
+    med = st.sidebar.checkbox("Show Median Comparison", True, key="adm_med")
+    df = df[(df["Date"]>=sd)&(df["Date"]<=ed)]
+
+    st.sidebar.header("Staff & Options")
+    include_cst = st.sidebar.checkbox("Only with CST", False)
+    names = df["Name"].unique()
+    if include_cst:
+        has = df[df["Shift"]=="CST"].groupby("Name").size()>0
+        names = [n for n in names if has.get(n,False)]
+    names = [n for n in names if "JNR" not in n]
+    sel = st.sidebar.multiselect("Select Staff", names, default=names)
+
+    def get_admin_hours(r):
+        s = r["Shift"]
+        if s=="CST": return 10
+        if s in ["HB IC PM","HB 21C PM"]: return 3
+        if s=="MIC": return 5
+        if s in ["HB AM EDSTTA","HB IC AM"]:
+            return 5 if r["Date"].weekday()<5 else 0
+        return 0
+
+    df["AH"] = df.apply(get_admin_hours,axis=1)
+    gp = df[df["Name"].isin(sel)].groupby("Name").agg(
+        TotalAH=("AH","sum"), TotalShifts=("Shift","count")
     )
-    grouped["AdminPercentage"] = (grouped["TotalAdminHours"] / (grouped["TotalShifts"] * 10)) * 100
-    
-    # ------------------- NEW TOGGLES ABOVE USER SELECT -----------------------
-    include_only_CST = st.sidebar.checkbox("Include only users with at least one CST shift", value=False)
-    show_annotations = st.sidebar.checkbox("Show Percentage Annotations", value=True)
-    
-    # ------------------- SELECT USERS TO DISPLAY -----------------------
-    # Exclude users with "JNR" in their name.
-    if include_only_CST:
-        # Identify users with at least one "CST" shift.
-        cst_users = df_filtered.groupby("Name")["Shift"].apply(lambda x: (x == "CST").any())
-        cst_users = cst_users[cst_users].index.tolist()
-        all_users = [user for user in grouped.index if "JNR" not in user and user in cst_users]
-    else:
-        all_users = [user for user in grouped.index if "JNR" not in user]
-    
-    selected_users = st.sidebar.multiselect("Select Staff Members:", all_users, default=all_users)
-    
-    display_df = grouped.loc[selected_users]
-    
-    # ------------------- PLOT ADMINISTRATIVE TIME PERCENTAGE -----------------------
-    st.subheader("Administrative Time Percentage by Staff Member")
-    fig, ax = plt.subplots(figsize=(8, 5))
-    
-    bars = ax.bar(display_df.index, display_df["AdminPercentage"], color="skyblue")
-    ax.set_ylabel("Administrative Time (%)")
-    ax.set_ylim(0, 100)
-    ax.set_title("Administrative Time Percentage for Selected Staff Members")
-    
-    # Rotate x-axis labels to 45° for better readability.
-    ax.set_xticks(range(len(display_df.index)))
-    ax.set_xticklabels(display_df.index, rotation=45, ha="right")
-    
-    if show_annotations:
-        for bar in bars:
-            height = bar.get_height()
-            ax.annotate(f'{height:.1f}%', 
-                        xy=(bar.get_x() + bar.get_width()/2, height),
-                        xytext=(0, 3), textcoords="offset points",
-                        ha='center', va='bottom')
-    
+    gp["Admin%"] = gp["TotalAH"]/(gp["TotalShifts"]*10)*100
+
+    fig, ax = plt.subplots(figsize=(8,5))
+    bars = ax.bar(gp.index, gp["Admin%"], color="skyblue")
+    ax.set_ylim(0,100)
+    ax.set_ylabel("Admin %")
+    ax.set_title("Administrative % by Staff")
+    if st.sidebar.checkbox("Show Annotations", True, key="adm_annot"):
+        for b in bars:
+            h=b.get_height(); ax.text(b.get_x()+b.get_width()/2,h+1,f"{h:.1f}%",ha="center")
     st.pyplot(fig)
 
 # =============================================================================
@@ -305,114 +208,57 @@ def admin_time_page():
 # =============================================================================
 def hb_admin_time_page():
     st.title("HB Administrative Time Analysis")
-
-    if "df_melted" not in st.session_state or st.session_state["df_melted"] is None:
-        st.error("No file uploaded yet. Please go to 'Upload File' and upload one.")
+    if "df_melted" not in st.session_state:
+        st.error("Upload first.")
         return
+    df = st.session_state["df_melted"]
 
-    df_melted = st.session_state["df_melted"]
-
-    # ----- Date range picker for HB page (unique key) -----
     st.sidebar.header("HB Time Filters")
-    min_date = df_melted["Date"].min()
-    max_date = df_melted["Date"].max()
-    hb_start, hb_end = st.sidebar.date_input(
-        "Select Date Range (HB)", [min_date, max_date], key="hb_date_range"
-    )
-
-    # ----- Percentage / Median toggles (unique keys) -----
-    hb_show_percentage = st.sidebar.checkbox(
-        "Show Percentages", value=True, key="hb_show_percentage"
-    )
-    hb_show_median = st.sidebar.checkbox(
-        "Show Median Comparison", value=True, key="hb_show_median"
-    )
-
-    # ----- Filter to date window -----
-    df_hb = df_melted[
-        (df_melted["Date"] >= pd.Timestamp(hb_start))
-        & (df_melted["Date"] <= pd.Timestamp(hb_end))
-    ].copy()
-
-    # ----- Keep only HB-prefixed shifts -----
+    mn, mx = df["Date"].min(), df["Date"].max()
+    sd, ed = st.sidebar.date_input("Date Range (HB)", [mn, mx], key="hb_date")
+    pct = st.sidebar.checkbox("Show Percentages", True, key="hb_pct")
+    med = st.sidebar.checkbox("Show Median Comparison", True, key="hb_med")
+    df_hb = df[(df["Date"]>=sd)&(df["Date"]<=ed)]
     df_hb = df_hb[df_hb["Shift"].str.upper().str.startswith("HB")]
-
     if df_hb.empty:
-        st.info("No HB shifts found in this date range.")
+        st.info("No HB shifts.")
         return
 
-    # ----- Admin hours mapping (same as on Admin page) -----
-    def get_admin_hours(row):
-        s = row["Shift"]
-        if s == "CST":
-            return 10
-        elif s in ["HB IC PM", "HB 21C PM"]:
-            return 3
-        elif s == "MIC":
-            return 5
-        elif s in ["HB AM EDSTTA", "HB IC AM"]:
-            return 5 if row["Date"].weekday() < 5 else 0
-        else:
-            return 0
+    def get_admin_hours(r):
+        s=r["Shift"]
+        if s=="CST": return 10
+        if s in ["HB IC PM","HB 21C PM"]: return 3
+        if s=="MIC": return 5
+        if s in ["HB AM EDSTTA","HB IC AM"]:
+            return 5 if r["Date"].weekday()<5 else 0
+        return 0
 
-    df_hb["AdminHours"] = df_hb.apply(get_admin_hours, axis=1)
-
-    # ----- Aggregate per user -----
-    grouped = df_hb.groupby("Name").agg(
-        TotalAdminHours=pd.NamedAgg("AdminHours", "sum"),
-        TotalHBShifts=pd.NamedAgg("Shift", "count")
+    df_hb["AH"] = df_hb.apply(get_admin_hours,axis=1)
+    gp = df_hb.groupby("Name").agg(
+        TotalAH=("AH","sum"), TotalShifts=("Shift","count")
     )
-    grouped["Admin%"] = (grouped["TotalAdminHours"] / (grouped["TotalHBShifts"] * 10) * 100).round(2)
+    gp["Admin%"] = gp["TotalAH"]/(gp["TotalShifts"]*10)*100
 
-    # ----- Median for HB page only -----
-    if hb_show_median:
-        all_hb = df_hb.groupby("Name").agg(
-            AdminHrs=pd.NamedAgg("AdminHours", "sum"),
-            HBShifts=pd.NamedAgg("Shift", "count")
-        )
-        all_hb["Admin%"] = all_hb["AdminHrs"] / (all_hb["HBShifts"] * 10) * 100
-        median_pct = all_hb["Admin%"].median()
+    if med:
+        all_gp = gp.copy()
+        median_pct = all_gp["Admin%"].median()
 
-    # ----- User selection -----
-    users = list(grouped.index)
-    selected = st.sidebar.multiselect("Select Staff Members:", users, default=users)
+    sel = st.sidebar.multiselect("Select Staff", gp.index.tolist(), default=gp.index.tolist())
+    disp = gp.loc[sel]
 
-    display = grouped.loc[selected]
-
-    # ----- Plotting -----
-    st.subheader("HB Admin Time % by Staff")
-    fig, ax = plt.subplots(figsize=(8, 5))
-
-    x = np.arange(len(display))
-    width = 0.4
-
-    ax.bar(
-        x,
-        display["Admin%"],
-        width,
-        label="Selected Staff",
-        color="skyblue",
-        align="center"
-    )
-    if hb_show_median:
-        ax.bar(
-            x + width,
-            [median_pct] * len(display),
-            width,
-            label="Median (All HB Staff)",
-            color="orange",
-            align="center"
-        )
-
-    ax.set_xticks(x + (width / 2 if hb_show_median else 0))
-    ax.set_xticklabels(display.index, rotation=45, ha="right")
-    ax.set_ylabel("Percentage" if hb_show_percentage else "Admin Hours")
-    ax.set_ylim(0, 100 if hb_show_percentage else None)
-    ax.set_title("HB Administrative Time Comparison")
+    fig, ax = plt.subplots(figsize=(8,5))
+    x = np.arange(len(disp))
+    w=0.4
+    ax.bar(x, disp["Admin%"], w, label="Staff", color="skyblue")
+    if med:
+        ax.bar(x+w, [median_pct]*len(disp), w, label="Median", color="orange")
+    ax.set_xticks(x + (w/2 if med else 0))
+    ax.set_xticklabels(disp.index, rotation=45, ha="right")
+    ax.set_ylabel("Admin %" if pct else "Hours")
+    ax.set_ylim(0,100)
+    ax.set_title("HB Admin % Comparison")
     ax.legend()
-
     st.pyplot(fig)
-
 
 # =============================================================================
 #                            PAGE NAVIGATION
@@ -421,7 +267,6 @@ page = st.sidebar.radio(
     "Navigation",
     ["Upload File", "Main Data", "Administrative Time", "HB Administrative Time"]
 )
-
 if page == "Upload File":
     upload_page()
 elif page == "Main Data":
