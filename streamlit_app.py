@@ -212,35 +212,37 @@ def main_data_page():
     ax.legend()
     st.pyplot(fig)
 
-# --- CST Summary Table (all staff, but day‐filtered) ---
-st.subheader("CST-Related Hours Summary")
+ # Define the row‐wise CST‐hours function **before** you call `apply`
+    def get_cst_hours(row):
+        s = row["Shift"]
+        # always count
+        if s == "CST":
+            return 10
+        # count only on weekdays
+        if s in ["HB CDU AM", "HB AM EDSTTA"]:
+            return 5 if row["Date"].weekday() < 5 else 0
+        # always count these PM shifts
+        if s in ["HB 2IC PM", "HB IC PM", "HB CDU PM"]:
+            return 3
+        return 0
 
-def get_cst_hours(row):
-    s = row["Shift"]
-    # always count these
-    if s == "CST":
-        return 10
-    # these only count on weekdays
-    if s in ["HB CDU AM", "HB AM EDSTTA"]:
-        return 5 if row["Date"].weekday() < 5 else 0
-    # always count these
-    if s in ["HB 2IC PM", "HB IC PM", "HB CDU PM"]:
-        return 3
-    return 0
+    # Now apply it:
+    df_table["CSTHours"] = df_table.apply(get_cst_hours, axis=1)
 
-# apply to every row of df_table
-df_table["CSTHours"] = df_table.apply(get_cst_hours, axis=1)
+    # Build your summary
+    summary = df_table.groupby("Name").agg(
+        TotalShifts   = ("Shift",      "count"),
+        TotalHours    = ("Shift",      lambda x: len(x) * 10),
+        TotalCSTHours = ("CSTHours",   "sum")
+    )
+    summary["Percentage CST"] = (
+        summary["TotalCSTHours"] 
+        / summary["TotalHours"] * 100
+    ).round(2).fillna(0)
 
-# build summary
-summary = df_table.groupby("Name").agg(
-    TotalShifts       = ("Shift", "count"),
-    TotalHours        = ("Shift", lambda x: x.count() * 10),
-    TotalCSTHours     = ("CSTHours", "sum")
-)
-
-summary["Percentage CST"] = (summary["TotalCSTHours"] / summary["TotalHours"] * 100).round(2).fillna(0)
-
-st.table(summary[["TotalHours","TotalCSTHours","Percentage CST"]])
+    st.subheader("CST-Related Hours Summary")
+    st.table(summary[["TotalHours","TotalCSTHours","Percentage CST"]])
+    # --------------------------------------------------------------------------
 
 
 # =============================================================================
