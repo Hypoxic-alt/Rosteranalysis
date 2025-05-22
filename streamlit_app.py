@@ -212,36 +212,35 @@ def main_data_page():
     ax.legend()
     st.pyplot(fig)
 
-    # --- New: CST-Related Hours Table for ALL STAFF ---
-    st.subheader("CST-Related Hours Summary (Selected Shifts)")
+# --- CST Summary Table (all staff, but day‐filtered) ---
+st.subheader("CST-Related Hours Summary")
 
-    # Filter down to active shifts
-    df_active = df_filtered[df_filtered["Shift"].isin(active_shifts)]
+def get_cst_hours(row):
+    s = row["Shift"]
+    # always count these
+    if s == "CST":
+        return 10
+    # these only count on weekdays
+    if s in ["HB CDU AM", "HB AM EDSTTA"]:
+        return 5 if row["Date"].weekday() < 5 else 0
+    # always count these
+    if s in ["HB 2IC PM", "HB IC PM", "HB CDU PM"]:
+        return 3
+    return 0
 
-    # Define CST-related mapping
-    cst_map = {
-        "CST": 10,
-        "HB CDU AM": 5,
-        "HB AM EDSTTA": 5,
-        "HB 2IC PM": 3,
-        "HB IC PM": 3,
-        "HB CDU PM": 3
-    }
+# apply to every row of df_table
+df_table["CSTHours"] = df_table.apply(get_cst_hours, axis=1)
 
-    # Compute for each staff member
-    summary = df_active.groupby("Name").agg(
-        TotalShifts=("Shift", "count")
-    )
-    summary["Total Hours"] = summary["TotalShifts"] * 10
-    # Sum CST-related hours per Name
-    summary["Total CST Hours"] = df_active.groupby("Name")["Shift"] \
-        .apply(lambda s: s.map(cst_map).fillna(0).sum())
-    summary["Percentage CST"] = (summary["Total CST Hours"] 
-                                 / summary["Total Hours"] * 100).round(2).fillna(0)
+# build summary
+summary = df_table.groupby("Name").agg(
+    TotalShifts       = ("Shift", "count"),
+    TotalHours        = ("Shift", lambda x: x.count() * 10),
+    TotalCSTHours     = ("CSTHours", "sum")
+)
 
-    # Reorder and display
-    summary = summary[["Total Hours", "Total CST Hours", "Percentage CST"]]
-    st.table(summary)
+summary["Percentage CST"] = (summary["TotalCSTHours"] / summary["TotalHours"] * 100).round(2).fillna(0)
+
+st.table(summary[["TotalHours","TotalCSTHours","Percentage CST"]])
 
 
 # =============================================================================
