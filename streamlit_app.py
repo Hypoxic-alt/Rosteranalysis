@@ -137,14 +137,14 @@ def main_data_page():
     selected_name = st.sidebar.selectbox("Select a Name:", df_filtered["Name"].unique())
     df_person = df_filtered[df_filtered["Name"] == selected_name]
 
-  st.sidebar.header("Select Shifts (Charts Only)")
-# Use df_filtered to get every shift in the date range
-shift_opts = sorted(df_filtered["Shift"].unique())
-# Build checkboxes for all those shifts
-selected_shifts = {shift: st.sidebar.checkbox(shift, True) for shift in shift_opts}
-active_shifts = [shift for shift, show in selected_shifts.items() if show]
-# Then filter your person’s data for the charts
-df_person = df_person[df_person["Shift"].isin(active_shifts)]
+    st.sidebar.header("Select Shifts (Charts Only)")
+    # Use df_filtered to get every shift in the date range
+    shift_opts = sorted(df_filtered["Shift"].unique())
+    # Build checkboxes for all those shifts
+    selected_shifts = {shift: st.sidebar.checkbox(shift, True) for shift in shift_opts}
+    active_shifts = [shift for shift, show in selected_shifts.items() if show]
+    # Then filter your person’s data for the charts
+    df_person = df_person[df_person["Shift"].isin(active_shifts)]
 
 
     # --- Plot 1: Shift Distribution ---
