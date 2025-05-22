@@ -117,115 +117,102 @@ def upload_page():
 # =============================================================================
 def main_data_page():
     st.title("Main Data")
-    
-    if "df_melted" not in st.session_state or st.session_state["df_melted"] is None:
-        st.error("No file uploaded yet. Please navigate to the 'Upload File' page and upload a file.")
+    if "df_melted" not in st.session_state:
+        st.error("Please upload a file first.")
         return
-    
-    df_melted = st.session_state["df_melted"]
+    df = st.session_state["df_melted"]
 
-    # ------------------- SIDEBAR FILTERS -----------------------
+    # --- Sidebar filters ---
     st.sidebar.header("Main Data Filters")
-    min_date = df_melted["Date"].min()
-    max_date = df_melted["Date"].max()
-    start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date])
-    show_percentage = st.sidebar.checkbox("Show Percentages", value=True)
-    show_median = st.sidebar.checkbox("Show Median Comparison", value=True)
-    
-    # Apply date filter
-    df_filtered = df_melted[
-        (df_melted["Date"] >= pd.Timestamp(start_date)) &
-        (df_melted["Date"] <= pd.Timestamp(end_date))
-    ]
-    
-    # ------------------- FILTER BY NAME & SHIFT -----------------------
+    mn, mx = df["Date"].min(), df["Date"].max()
+    sd, ed = st.sidebar.date_input("Select Date Range", [mn, mx])
+    sd, ed = pd.Timestamp(sd), pd.Timestamp(ed)
+    show_pct = st.sidebar.checkbox("Show Percentages", True)
+    show_med = st.sidebar.checkbox("Show Median Comparison", True)
+
+    df_filtered = df[(df["Date"] >= sd) & (df["Date"] <= ed)]
+
+    # --- Name & shift selection ---
     st.sidebar.header("Filter Options")
-    names = df_filtered["Name"].unique()
-    selected_name = st.sidebar.selectbox("Select a Name:", names)
+    selected_name = st.sidebar.selectbox("Select a Name:", df_filtered["Name"].unique())
     df_person = df_filtered[df_filtered["Name"] == selected_name]
-    
-    st.sidebar.header("Select Shifts to Display")
-    shift_options = sorted(df_person["Shift"].unique())
-    selected_shifts = {shift: st.sidebar.checkbox(shift, value=True) for shift in shift_options}
-    active_shifts = [shift for shift, selected in selected_shifts.items() if selected]
+
+    st.sidebar.header("Select Shifts")
+    shift_opts = sorted(df_person["Shift"].unique())
+    active_shifts = [s for s in shift_opts if st.sidebar.checkbox(s, True)]
     df_person = df_person[df_person["Shift"].isin(active_shifts)]
-    
-    # ------------------- PLOT 1: SHIFT DISTRIBUTION -----------------------
+
+    # --- Plot 1: Shift Distribution (unchanged) ---
     st.subheader(f"Shift Distribution for {selected_name}")
     shift_counts = df_person["Shift"].value_counts()
-    if show_percentage:
+    if show_pct:
         shift_counts = (shift_counts / shift_counts.sum()) * 100
-    all_shifts_data = df_filtered[df_filtered["Shift"].isin(active_shifts)]
-    median_shift_counts = all_shifts_data.groupby("Name")["Shift"].value_counts().unstack(fill_value=0).median(axis=0)
-    if show_percentage:
+
+    all_sel = df_filtered[df_filtered["Shift"].isin(active_shifts)]
+    median_shift_counts = (
+        all_sel.groupby("Name")["Shift"]
+               .value_counts()
+               .unstack(fill_value=0)
+               .median(axis=0)
+    )
+    if show_pct:
         median_shift_counts = (median_shift_counts / median_shift_counts.sum()) * 100
-    
-    all_shifts = set(shift_counts.index).union(set(median_shift_counts.index))
-    shift_counts = shift_counts.reindex(all_shifts, fill_value=0)
-    median_shift_counts = median_shift_counts.reindex(all_shifts, fill_value=0)
-    
+
+    keys = sorted(set(shift_counts.index) | set(median_shift_counts.index))
+    shift_counts = shift_counts.reindex(keys, fill_value=0)
+    median_shift_counts = median_shift_counts.reindex(keys, fill_value=0)
+
     fig, ax = plt.subplots(figsize=(10, 5))
-    bar_width = 0.4
-    x = range(len(shift_counts))
-    ax.bar(x, shift_counts, width=bar_width, label=selected_name, color="skyblue", align='center')
-    if show_median:
-        ax.bar([i + bar_width for i in x], median_shift_counts, width=bar_width,
-               label="Median (All Staff)", color="orange", align='center')
-    
-    ax.set_xticks([i + bar_width / 2 for i in x])
-    ax.set_xticklabels(shift_counts.index, rotation=45, ha="right")
-    ax.set_ylabel("Percentage" if show_percentage else "Count")
-    ax.set_xlabel("Shift Type")
+    x = np.arange(len(keys))
+    w = 0.4
+    ax.bar(x, shift_counts, w, label=selected_name, color="skyblue")
+    if show_med:
+        ax.bar(x + w, median_shift_counts, w, label="Median", color="orange")
+    ax.set_xticks(x + w/2)
+    ax.set_xticklabels(keys, rotation=45, ha="right")
+    ax.set_ylabel("Percentage" if show_pct else "Count")
     ax.legend()
     st.pyplot(fig)
-    
-    # ------------------- PLOT 2: WEEKDAY VS. WEEKEND -----------------------
-    st.subheader(f"Weekday vs. Weekend Shifts for {selected_name}")
+
+    # --- Plot 2: Weekday vs Weekend (unchanged) ---
+    st.subheader(f"Weekday vs. Weekend for {selected_name}")
     df_person["Day"] = df_person["Date"].dt.day_name()
-    total_shifts = len(df_person)
-    weekend_shifts = len(df_person[df_person["Day"].isin(["Saturday", "Sunday"])])
-    weekday_shifts = total_shifts - weekend_shifts
-    
-    if show_percentage and total_shifts > 0:
-        weekend_shifts = (weekend_shifts / total_shifts) * 100
-        weekday_shifts = (weekday_shifts / total_shifts) * 100
-    
-    if show_median:
-        all_weekend_counts = df_filtered.groupby("Name").apply(lambda x: (x["Date"].dt.day_name().isin(["Saturday", "Sunday"])).sum())
-        all_weekday_counts = df_filtered.groupby("Name").apply(lambda x: (~x["Date"].dt.day_name().isin(["Saturday", "Sunday"])).sum())
-        median_weekend = all_weekend_counts.median()
-        median_weekday = all_weekday_counts.median()
-        if show_percentage:
-            median_total = median_weekend + median_weekday
-            if median_total > 0:
-                median_weekend = (median_weekend / median_total) * 100
-                median_weekday = (median_weekday / median_total) * 100
-    
+    total = len(df_person)
+    weekend = df_person["Day"].isin(["Saturday", "Sunday"]).sum()
+    weekday = total - weekend
+
+    if show_pct and total > 0:
+        weekend = weekend / total * 100
+        weekday = weekday / total * 100
+
+    if show_med:
+        all_weekend = df_filtered.groupby("Name").apply(
+            lambda x: x["Date"].dt.day_name().isin(["Saturday", "Sunday"]).sum()
+        )
+        all_weekday = df_filtered.groupby("Name").apply(
+            lambda x: (~x["Date"].dt.day_name().isin(["Saturday", "Sunday"])).sum()
+        )
+        med_weekend = all_weekend.median()
+        med_weekday = all_weekday.median()
+        if show_pct and (med_weekday + med_weekend) > 0:
+            med_weekend = med_weekend / (med_weekend + med_weekday) * 100
+            med_weekday = med_weekday / (med_weekend + med_weekday) * 100
+
     fig, ax = plt.subplots(figsize=(6, 4))
     labels = ["Weekdays", "Weekends"]
-    selected_values = [weekday_shifts, weekend_shifts]
-    median_values = [median_weekday, median_weekend] if show_median else None
-    
-    x = np.arange(len(labels))
-    bar_width = 0.4
-    ax.bar(x, selected_values, width=bar_width, label=selected_name, color="skyblue", align='center')
-    if show_median:
-        ax.bar(x + bar_width, median_values, width=bar_width, label="Median (All Staff)", color="orange", align='center')
-    
-    ax.set_xticks(x + (bar_width / 2 if show_median else 0))
-    ax.set_xticklabels(labels)
-    ax.set_ylabel("Percentage" if show_percentage else "Count")
-    ax.set_title(f"Weekday vs. Weekend Shifts for {selected_name}")
+    ax.bar(labels, [weekday, weekend], color=["blue", "red"], label=selected_name)
+    if show_med:
+        ax.bar(labels, [med_weekday, med_weekend], alpha=0.5, color="orange", label="Median")
+    ax.set_ylabel("Percentage" if show_pct else "Count")
     ax.legend()
     st.pyplot(fig)
 
-# --- New: CST Percentage Table ---
-    st.subheader(f"CST-Related Hours for {person}")
-    # Total hours = count of selected shifts * 10h
-    total_shifts = len(df_p)
-    total_hours = total_shifts * 10
+    # --- NEW: CST-Related Hours Table ---
+    st.subheader(f"CST-Related Hours for {selected_name}")
+    # Total hours = number of selected shifts * 10 h
+    total_hours = len(df_person) * 10
 
-    # Define CST-related mapping
+    # Hour mapping for CST-related codes
     cst_map = {
         "CST": 10,
         "HB CDU AM": 5,
@@ -234,17 +221,17 @@ def main_data_page():
         "HB IC PM": 3,
         "HB CDU PM": 3
     }
-    # Sum up hours for only those CST-related shifts
-    cst_hours = df_p["Shift"].map(cst_map).fillna(0).sum()
+    # Sum cst hours only for the filtered person
+    cst_hours = df_person["Shift"].map(cst_map).fillna(0).sum()
 
-    # Build result table
     result = pd.DataFrame({
         "Total Hours": [total_hours],
         "Total CST-Related Hours": [cst_hours],
-        "CST % of Total": [(cst_hours/total_hours*100) if total_hours>0 else 0]
-    }).round(2)
+        "CST % of Total": [round((cst_hours / total_hours * 100) if total_hours else 0, 2)]
+    })
 
     st.table(result)
+
 # =============================================================================
 #                    PAGE 3: ADMINISTRATIVE TIME ANALYSIS
 # =============================================================================
