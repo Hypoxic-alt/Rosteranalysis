@@ -8,49 +8,54 @@ import numpy as np
 # =============================================================================
 def process_file(source):
     """
-    Process the Excel file from the given source (which can be a file-like object
-    or a URL) and return a melted DataFrame with columns: 'Name', 'Date', 'Shift'.
+    Process the Excel file (uploaded or URL), infer multi-year dates,
+    and return a tidy DataFrame with ['Name','Date','Shift'].
     """
-    # Read the Excel file from the source and select the first sheet
-    df = pd.ExcelFile(source)
-    sheet_name = df.sheet_names[0]
-    df = pd.read_excel(df, sheet_name=sheet_name, header=None)
+    # 1) Read raw
+    xls = pd.ExcelFile(source)
+    sheet = xls.sheet_names[0]
+    raw = pd.read_excel(xls, sheet_name=sheet, header=None)
 
-    # ----------------- DATA CLEANING & PREPARATION ---------------------------
-    # Assume data starts at row 3 (0-indexed row 3)
-    df_cleaned = df.iloc[3:].reset_index(drop=True)
-    # Row 1 (index 1) contains headers (names and dates)
-    df_cleaned.columns = df.iloc[1]
-    # Rename the first column to "Name"
-    df_cleaned.rename(columns={df_cleaned.columns[0]: "Name"}, inplace=True)
-    # Drop any completely empty columns
-    df_cleaned = df_cleaned.dropna(axis=1, how='all')
+    # 2) Chop off the first 3 rows of meta, set up headers
+    df = raw.iloc[3:].reset_index(drop=True)
+    df.columns = raw.iloc[1]
+    df.rename(columns={df.columns[0]:"Name"}, inplace=True)
+    df = df.dropna(axis=1, how='all')
 
-    # ----------------- DATE EXTRACTION & CORRECTION --------------------------
-    # Extract date strings from row 3 (index 2) and append a default year (2024)
-    date_strings = df.iloc[2, 1:].dropna().astype(str) + "-2024"
+    # 3) Pull the date‐row strings, append placeholder year
+    date_strs = raw.iloc[2,1:].dropna().astype(str) + "-XXXX"  # we’ll replace XXXX
+    # Parse them once to get month/day
+    mds = [pd.to_datetime(s[:-5], format='%a %d-%b', errors='coerce') for s in date_strs]
+
+    # 4) Decide start year based on today's date vs first month
+    now = datetime.now()
+    start_year = now.year - 1 if mds[0].month > now.month else now.year
+
+    # 5) Build corrected_dates by rolling forward whenever month decreases
     corrected_dates = []
-    current_year = 2024
-    for date in date_strings:
-        parsed_date = pd.to_datetime(date[:-5], format='%a %d-%b', errors='coerce')
-        if corrected_dates and parsed_date.month == 1 and corrected_dates[-1].month == 12:
-            current_year = 2025
-        corrected_date_str = f"{parsed_date.strftime('%a %d-%b')}-{current_year}"
-        corrected_date = pd.to_datetime(corrected_date_str, format='%a %d-%b-%Y', errors='coerce')
-        corrected_dates.append(corrected_date)
-    date_series = pd.Series(corrected_dates)
-    df_cleaned.columns = ["Name"] + list(date_series)
+    year = start_year
+    prev_month = None
+    for md in mds:
+        if prev_month is not None and md.month < prev_month:
+            year += 1
+        corrected_dates.append(
+            pd.to_datetime(f"{md.strftime('%a %d-%b')}-{year}", format='%a %d-%b-%Y')
+        )
+        prev_month = md.month
 
-    # ----------------- RESHAPE DATA TO LONG FORMAT ---------------------------
-    df_melted = df_cleaned.melt(id_vars=["Name"], var_name="Date", value_name="Shift")
-    df_melted["Date"] = pd.to_datetime(df_melted["Date"], errors='coerce')
-    df_melted = df_melted.dropna(subset=["Shift"])
+    # 6) Assign real datetime columns
+    df.columns = ["Name"] + corrected_dates
 
-    # ----------------- FILTER OUT UNWANTED SHIFT TYPES -----------------------
-    excluded_shifts = ["OFF", "Off", "RL SMO", "FL SMO", "SL", "PDL SMO"]
-    df_melted = df_melted[~df_melted["Shift"].isin(excluded_shifts)]
-    
-    return df_melted
+    # 7) Melt to long form and clean
+    df_long = df.melt(id_vars="Name", var_name="Date", value_name="Shift")
+    df_long["Date"] = pd.to_datetime(df_long["Date"], errors='coerce')
+    df_long = df_long.dropna(subset=["Shift"])
+
+    # 8) Drop unwanted shifts
+    exclude = ["OFF","Off","RL SMO","FL SMO","SL","PDL SMO"]
+    df_long = df_long[~df_long["Shift"].isin(exclude)]
+
+    return df_long
 
 # =============================================================================
 #         HELPER FUNCTION TO CONVERT GOOGLE DRIVE SHAREABLE URL
