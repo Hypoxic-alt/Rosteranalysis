@@ -218,90 +218,86 @@ def main_data_page():
 # =============================================================================
 def admin_time_page():
     st.title("Administrative Time Analysis")
-    if "df_melted" not in st.session_state:
-        st.error("Upload first.")
+    
+    if "df_melted" not in st.session_state or st.session_state["df_melted"] is None:
+        st.error("No file uploaded yet. Please navigate to the 'Upload File' page and upload a file.")
         return
-    df = st.session_state["df_melted"]
+    
+    df_melted = st.session_state["df_melted"]
+    
+    # ------------------- SIDEBAR FILTERS -----------------------
+    st.sidebar.header("Administrative Time Filters")
+    min_date = df_melted["Date"].min()
+    max_date = df_melted["Date"].max()
+    start_date, end_date = st.sidebar.date_input("Select Date Range", [min_date, max_date])
+    
+    # Filter data based on the selected date range
+    df_filtered = df_melted[
+        (df_melted["Date"] >= pd.Timestamp(start_date)) &
+        (df_melted["Date"] <= pd.Timestamp(end_date))
+    ].copy()
+    
+    # ------------------- CALCULATE ADMINISTRATIVE HOURS -----------------------
+    def get_admin_hours(row):
+        shift = row["Shift"]
+        if shift == "CST":
+            return 10
+        elif shift in ["HB IC PM", "HB 21C PM"]:
+            return 3
+        elif shift == "MIC":
+            return 5
+        elif shift in ["HB AM EDSTTA", "HB IC AM"]:
+            return 5 if row["Date"].weekday() < 5 else 0
+        else:
+            return 0
 
-    # --- Date filtering ---
-    st.sidebar.header("Admin Time Filters")
-    mn, mx = df["Date"].min(), df["Date"].max()
-    sd, ed = st.sidebar.date_input("Select Date Range", [mn, mx], key="adm_date")
-    sd, ed = pd.Timestamp(sd), pd.Timestamp(ed)
-    df_filt = df[(df["Date"] >= sd) & (df["Date"] <= ed)].copy()
-
-    # --- Denominator option ---
-    use_hb_mic = st.sidebar.checkbox(
-        "Use HB/MIC/RAT shifts only as denominator", value=False, key="adm_hbmic"
+    df_filtered["AdminHours"] = df_filtered.apply(get_admin_hours, axis=1)
+    
+    grouped = df_filtered.groupby("Name").agg(
+        TotalAdminHours=pd.NamedAgg(column="AdminHours", aggfunc="sum"),
+        TotalShifts=pd.NamedAgg(column="Shift", aggfunc="count")
     )
-
-    # --- Other toggles ---
-    show_pct = st.sidebar.checkbox("Show Percentages", value=True, key="adm_pct")
-    show_med = st.sidebar.checkbox("Show Median Comparison", value=True, key="adm_med")
-
-    # --- Staff selection ---
-    st.sidebar.header("Staff Selection")
-    names = df_filt["Name"].unique()
-    selected = st.sidebar.multiselect("Select Staff Members:", names, default=names)
-    df_filt = df_filt[df_filt["Name"].isin(selected)]
-
-    # --- Compute AdminHours as before ---
-    def get_admin_hours(r):
-        s = r["Shift"]
-        if s == "CST": return 10
-        if s in ["HB IC PM", "HB 21C PM"]: return 3
-        if s == "MIC": return 5
-        if s in ["HB AM EDSTTA", "HB IC AM"]:
-            return 5 if r["Date"].weekday() < 5 else 0
-        return 0
-
-    df_filt["AdminHours"] = df_filt.apply(get_admin_hours, axis=1)
-
-    # --- Aggregate totals ---
-    grouped = df_filt.groupby("Name").agg(
-        TotalAdminHours=("AdminHours", "sum"),
-        TotalShifts=("Shift", "count")
-    )
-
-    # --- Build the denominator correctly ---
-    if use_hb_mic:
-        mask = (
-            df_filt["Shift"].str.upper().str.startswith("HB")
-            | df_filt["Shift"].str.upper().isin(["MIC", "RAT"])
-        )
-        denom_counts = df_filt[mask].groupby("Name")["Shift"].count()
-        # align with grouped.index, fill missing with 0
-        grouped["Denominator"] = denom_counts.reindex(grouped.index, fill_value=0)
+    grouped["AdminPercentage"] = (grouped["TotalAdminHours"] / (grouped["TotalShifts"] * 10)) * 100
+    
+    # ------------------- NEW TOGGLES ABOVE USER SELECT -----------------------
+    include_only_CST = st.sidebar.checkbox("Include only users with at least one CST shift", value=False)
+    show_annotations = st.sidebar.checkbox("Show Percentage Annotations", value=True)
+    
+    # ------------------- SELECT USERS TO DISPLAY -----------------------
+    # Exclude users with "JNR" in their name.
+    if include_only_CST:
+        # Identify users with at least one "CST" shift.
+        cst_users = df_filtered.groupby("Name")["Shift"].apply(lambda x: (x == "CST").any())
+        cst_users = cst_users[cst_users].index.tolist()
+        all_users = [user for user in grouped.index if "JNR" not in user and user in cst_users]
     else:
-        grouped["Denominator"] = grouped["TotalShifts"]
-
-    # --- Calculate Admin % ---
-    # assuming each counted shift is a 10-hour block
-    grouped["Admin%"] = (
-        grouped["TotalAdminHours"] / (grouped["Denominator"] * 10) * 100
-    ).round(2).fillna(0)
-
-    # --- Median ---
-    if show_med:
-        median_pct = grouped["Admin%"].median()
-
-    # --- Plot ---
-    st.subheader("Administrative Time % by Staff Member")
-    fig, ax = plt.subplots(figsize=(8,5))
-    bars = ax.bar(grouped.index, grouped["Admin%"], color="skyblue", label="Staff")
-    if show_med:
-        ax.axhline(median_pct, color="orange", linestyle="--", label="Median")
-    ax.set_ylim(0,100)
-    ax.set_ylabel("Admin %")
-    ax.set_title("Administrative % for Selected Staff")
-    ax.set_xticklabels(grouped.index, rotation=45, ha="right")
-    ax.legend()
-
-    if st.sidebar.checkbox("Show Annotations", True, key="adm_annot"):
-        for b in bars:
-            h = b.get_height()
-            ax.text(b.get_x() + b.get_width()/2, h + 1, f"{h:.1f}%", ha="center")
-
+        all_users = [user for user in grouped.index if "JNR" not in user]
+    
+    selected_users = st.sidebar.multiselect("Select Staff Members:", all_users, default=all_users)
+    
+    display_df = grouped.loc[selected_users]
+    
+    # ------------------- PLOT ADMINISTRATIVE TIME PERCENTAGE -----------------------
+    st.subheader("Administrative Time Percentage by Staff Member")
+    fig, ax = plt.subplots(figsize=(8, 5))
+    
+    bars = ax.bar(display_df.index, display_df["AdminPercentage"], color="skyblue")
+    ax.set_ylabel("Administrative Time (%)")
+    ax.set_ylim(0, 100)
+    ax.set_title("Administrative Time Percentage for Selected Staff Members")
+    
+    # Rotate x-axis labels to 45° for better readability.
+    ax.set_xticks(range(len(display_df.index)))
+    ax.set_xticklabels(display_df.index, rotation=45, ha="right")
+    
+    if show_annotations:
+        for bar in bars:
+            height = bar.get_height()
+            ax.annotate(f'{height:.1f}%', 
+                        xy=(bar.get_x() + bar.get_width()/2, height),
+                        xytext=(0, 3), textcoords="offset points",
+                        ha='center', va='bottom')
+    
     st.pyplot(fig)
 
 # =============================================================================
